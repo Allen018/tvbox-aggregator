@@ -16,44 +16,7 @@ import (
 )
 
 // defaultTopN 订阅源默认收录数量。
-const defaultTopN = 50
-
-// excludeCategoryKeywords 订阅清洗：排除的内容类别关键词。
-// 覆盖教育、网盘、磁力、相声、小品、音乐、戏曲、体育、央视/直播、工具/存储等非影视点播内容。
-// 通用影视源（名称不含排除关键词）予以保留。
-var excludeCategoryKeywords = []string{
-	// 教育
-	"教育", "课堂", "小学", "初中", "高中", "少儿", "启蒙", "教学",
-	// 网盘
-	"网盘", "云盘", "夸克", "夸父", "百度云", "阿里云盘", "alist", "alips", "分享", "聚盘", "盘他",
-	// 磁力
-	"磁力", "6v",
-	// 相声
-	"相声",
-	// 小品
-	"小品",
-	// 音乐
-	"音乐", "mv", "ktv", "音悦台", "酷狗", "歌词", "有声",
-	// 戏曲
-	"戏曲",
-	// 体育
-	"体育", "看球", "足球", "篮球", "赛事",
-	// 央视/直播
-	"央视", "直播",
-	// 工具/存储
-	"本地存储", "云搜", "小纸条", "Up搜",
-}
-
-// isExcludedCategory 判断站点名称是否属于排除的内容类别（大小写不敏感）。
-func isExcludedCategory(name string) bool {
-	lower := strings.ToLower(name)
-	for _, k := range excludeCategoryKeywords {
-		if strings.Contains(lower, k) {
-			return true
-		}
-	}
-	return false
-}
+const defaultTopN = 15
 
 // Builder 产物构建器。
 type Builder struct {
@@ -71,7 +34,6 @@ func New(jarBaseURL, outDir string) *Builder {
 //   - status.json  全量诊断信息
 //
 // discovered 为自动发现通道产出的源 URL 集合，其站点在产物中标注 [新发现]。
-// subProbes 为订阅式源抓取诊断结果，仅用于 status.json。
 func (b *Builder) Build(
 	sources []model.SourceConfig,
 	results map[string]*model.TestResult,
@@ -79,7 +41,6 @@ func (b *Builder) Build(
 	probes map[string]*model.WhitelistProbe,
 	discovered map[string]bool,
 	topN int,
-	subProbes map[string]*model.SubscriptionProbe,
 ) error {
 	if err := os.MkdirAll(b.OutDir, 0o755); err != nil {
 		return fmt.Errorf("创建输出目录失败: %w", err)
@@ -119,19 +80,15 @@ func (b *Builder) Build(
 	if err := b.writeJSON("tvbox.json", b.buildSubscription(sites, probes, topN)); err != nil {
 		return err
 	}
-	return b.writeJSON("status.json", b.buildStatus(sources, results, whitelist, probes, subProbes))
+	return b.writeJSON("status.json", b.buildStatus(sources, results, whitelist, probes))
 }
 
 // toSite 由源配置与测速结果组装输出站点条目，并将标签折叠进名称。
 func (b *Builder) toSite(src model.SourceConfig, res *model.TestResult, whitelisted, discovered bool) model.Site {
-	api := src.API
-	if api == "" {
-		api = src.URL
-	}
 	s := model.Site{
 		Name:        src.Name,
 		Type:        model.IntPtr(0),
-		API:         api,
+		API:         src.URL,
 		Searchable:  model.IntPtr(1),
 		QuickSearch: model.IntPtr(1),
 		SourceURL:   src.URL,
@@ -179,11 +136,8 @@ func (b *Builder) toSite(src model.SourceConfig, res *model.TestResult, whitelis
 	s.Tags = tags
 	s.Name = joinTags(src.Name, tags)
 
-	// JAR 本地化重写（仅配置了 local_jar 的爬虫站；订阅提取的第三方 jar 保持原地址）
-	if src.Type == "spider" && src.LocalJar {
-		s = b.rewriteJar(s)
-	}
-	return s
+	// JAR 本地化重写（爬虫站与携带 spider/jar 的站点）
+	return b.rewriteJar(s)
 }
 
 // joinTags 将标签折叠进站点名称（客户端仅展示 name）。
@@ -236,58 +190,6 @@ func spiderLatency(s model.Site) int64 {
 	return s.LatencyMs
 }
 
-// sortSpiderDiverse 爬虫站排序：已探测（OK）的按订阅组轮询交错，
-// 保证订阅来源多样性（不全部来自同一订阅）；组按延迟升序，组内按名称排序；
-// 未探测/失败的站点排在最后。
-func sortSpiderDiverse(spider []model.Site) []model.Site {
-	var measured, unmeasured []model.Site
-	for _, s := range spider {
-		if s.Status == model.StatusOK {
-			measured = append(measured, s)
-		} else {
-			unmeasured = append(unmeasured, s)
-		}
-	}
-
-	// 按订阅组分组（SourceURL 为组键）
-	groups := map[string][]model.Site{}
-	var order []string
-	for _, s := range measured {
-		g := s.SourceURL
-		if groups[g] == nil {
-			order = append(order, g)
-		}
-		groups[g] = append(groups[g], s)
-	}
-	// 组内按名称排序（稳定）
-	for _, g := range order {
-		sort.SliceStable(groups[g], func(i, j int) bool { return groups[g][i].Name < groups[g][j].Name })
-	}
-	// 组按延迟升序（与原项目 _lat 排序对齐）
-	sort.SliceStable(order, func(i, j int) bool {
-		return spiderLatency(groups[order[i]][0]) < spiderLatency(groups[order[j]][0])
-	})
-
-	// 轮询交错：每轮从各组各取一个
-	out := make([]model.Site, 0, len(spider))
-	maxLen := 0
-	for _, g := range order {
-		if len(groups[g]) > maxLen {
-			maxLen = len(groups[g])
-		}
-	}
-	for i := 0; i < maxLen; i++ {
-		for _, g := range order {
-			if i < len(groups[g]) {
-				out = append(out, groups[g][i])
-			}
-		}
-	}
-	// 未探测/失败的排在最后
-	out = append(out, unmeasured...)
-	return out
-}
-
 // buildSubscription 单一订阅版：清洗后排序取前 topN。
 //
 // 清洗规则：
@@ -304,12 +206,8 @@ func (b *Builder) buildSubscription(sites []model.Site, probes map[string]*model
 	}
 	var wl, ranked, spider []model.Site
 	for _, s := range sites {
-		// 内容类别排除（教育/网盘/磁力/相声/小品/音乐/戏曲/体育/央视直播/工具存储）
-		if isExcludedCategory(s.Name) {
-			continue
-		}
 		if s.Type != nil && s.Type.Value == 1 {
-			spider = append(spider, s)
+			spider = append(spider, s) // 爬虫站免测保留
 			continue
 		}
 		if hasTag(s, "[国内直连]") {
@@ -325,9 +223,10 @@ func (b *Builder) buildSubscription(sites []model.Site, probes map[string]*model
 		}
 	}
 	sort.SliceStable(ranked, func(i, j int) bool { return ranked[i].Score > ranked[j].Score })
-	// 爬虫站排序：按订阅组轮询交错，保证来源多样性（不全部来自同一订阅）；
-	// 未探测/失败的排在最后
-	spider = sortSpiderDiverse(spider)
+	// 爬虫站按延迟升序（与原项目 _lat 排序对齐；未探测到延迟者视为最大，排最后）
+	sort.SliceStable(spider, func(i, j int) bool {
+		return spiderLatency(spider[i]) < spiderLatency(spider[j])
+	})
 
 	// 名额分配：白名单与爬虫站优先保留，速度排序源填充剩余名额
 	room := topN - len(wl) - len(spider)
@@ -365,25 +264,22 @@ type StatusSummary struct {
 
 // StatusReport 完整诊断报告（dist/status.json）。
 type StatusReport struct {
-	Summary       StatusSummary             `json:"summary"`
-	Sources       []*model.TestResult       `json:"sources"`
-	Whitelist     []model.WhitelistProbe    `json:"whitelist"`
-	Subscriptions []model.SubscriptionProbe `json:"subscriptions"`
+	Summary   StatusSummary             `json:"summary"`
+	Sources   []*model.TestResult       `json:"sources"`
+	Whitelist []model.WhitelistProbe    `json:"whitelist"`
 }
 
-// buildStatus 汇总全部测速、白名单探测与订阅抓取诊断结果。
+// buildStatus 汇总全部测速与白名单探测结果。
 func (b *Builder) buildStatus(
 	sources []model.SourceConfig,
 	results map[string]*model.TestResult,
 	whitelist []model.WhitelistEntry,
 	probes map[string]*model.WhitelistProbe,
-	subProbes map[string]*model.SubscriptionProbe,
 ) *StatusReport {
 	rep := &StatusReport{
-		Summary:       StatusSummary{GeneratedAt: time.Now().UTC()},
-		Sources:       []*model.TestResult{},
-		Whitelist:     []model.WhitelistProbe{},
-		Subscriptions: []model.SubscriptionProbe{},
+		Summary:   StatusSummary{GeneratedAt: time.Now().UTC()},
+		Sources:   []*model.TestResult{},
+		Whitelist: []model.WhitelistProbe{},
 	}
 	for _, src := range sources {
 		rep.Summary.Total++
@@ -417,9 +313,6 @@ func (b *Builder) buildStatus(
 				Name: e.Name, URL: e.URL, CheckedAt: time.Now().UTC(), Error: "未探测",
 			})
 		}
-	}
-	for _, p := range subProbes {
-		rep.Subscriptions = append(rep.Subscriptions, *p)
 	}
 	return rep
 }

@@ -38,9 +38,6 @@ func TestRunEndToEnd(t *testing.T) {
 			w.Write(segment)
 		case r.URL.Path == "/home":
 			io.WriteString(w, "OK") // 白名单存活探测目标
-		case r.URL.Path == "/sub.json":
-			// 订阅式源配置：含一个 type 3 爬虫站与全局 spider
-			io.WriteString(w, `{"spider":"./x.jar","sites":[{"key":"sk","name":"订阅动漫站","type":3,"api":"csp_DouDouGuard"}]}`)
 		case r.URL.Path == "/":
 			io.WriteString(w, "OK") // 爬虫站延迟探测目标
 		case r.URL.Path == "/forbidden":
@@ -58,19 +55,20 @@ func TestRunEndToEnd(t *testing.T) {
 
 	sourcesContent := fmt.Sprintf(`top_n: 3
 sources:
-  - name: "模拟影视站"
+  - name: "模拟采集站"
     url: "%s/api.php/provide/vod"
     type: collect
-  - name: "模拟剧集站"
+  - name: "模拟封锁站"
     url: "%s/forbidden"
     type: collect
-  - name: "模拟订阅源"
-    url: "%s/sub.json"
-    type: subscription
+  - name: "模拟爬虫站"
+    url: "%s/"
+    type: spider
+    spider: "jar/spider.jar"
 `, srv.URL, srv.URL, srv.URL)
 
 	whitelistContent := fmt.Sprintf(`whitelist:
-  - name: "模拟国内影视"
+  - name: "模拟国内源"
     url: "%s/home"
 `, srv.URL)
 
@@ -89,7 +87,7 @@ sources:
 		t.Fatalf("run 失败: %v", err)
 	}
 
-	// ---- 断言 tvbox.json（单一订阅版）：清洗 + 白名单置顶 + 速度排序 + 订阅提取爬虫保底 ----
+	// ---- 断言 tvbox.json（单一订阅版）：清洗 + 白名单置顶 + 速度排序 + 爬虫保底 ----
 	sub := loadConfig(t, filepath.Join(outDir, "tvbox.json"))
 	if len(sub.Sites) != 3 {
 		t.Fatalf("订阅版期望 3 个站点（top_n=3），实际 %d", len(sub.Sites))
@@ -102,16 +100,16 @@ sources:
 	if !strings.Contains(sub.Sites[1].Name, "🚀") {
 		t.Errorf("订阅版次位应为测速成功源，实际 name=%q", sub.Sites[1].Name)
 	}
-	// 末位：订阅提取的爬虫站保底，全局 spider 相对路径已解析且未被重写
+	// 末位：爬虫站保底保留，JAR 已重写为本地地址
 	spider := sub.Sites[2]
-	if !strings.Contains(spider.Name, "订阅动漫站") {
-		t.Errorf("订阅版末位应为订阅提取的爬虫站，实际 name=%q", spider.Name)
+	if !strings.Contains(spider.Name, "爬虫") {
+		t.Errorf("订阅版末位应为爬虫站，实际 name=%q", spider.Name)
 	}
 	if spider.Type == nil || spider.Type.Value != 1 {
 		t.Error("爬虫站 type 应为 1")
 	}
-	if spider.Spider != srv.URL+"/x.jar" {
-		t.Errorf("订阅提取 spider 应解析为绝对地址且不重写，实际 %q", spider.Spider)
+	if spider.Spider != "https://cdn.example.com/jar/spider.jar" {
+		t.Errorf("spider 应被重写为本地地址，实际 %q", spider.Spider)
 	}
 	// 清洗：封锁站不应出现
 	for _, s := range sub.Sites {
@@ -140,9 +138,8 @@ sources:
 			Spider    int `json:"spider"`
 			Whitelist int `json:"whitelist"`
 		} `json:"summary"`
-		Sources       []*model.TestResult        `json:"sources"`
-		Whitelist     []model.WhitelistProbe     `json:"whitelist"`
-		Subscriptions []model.SubscriptionProbe `json:"subscriptions"`
+		Sources   []*model.TestResult     `json:"sources"`
+		Whitelist []model.WhitelistProbe `json:"whitelist"`
 	}
 	if err := json.Unmarshal(statusData, &rep); err != nil {
 		t.Fatalf("status.json 解析失败: %v", err)
@@ -154,10 +151,10 @@ sources:
 	if len(rep.Whitelist) != 1 || !rep.Whitelist[0].Alive {
 		t.Errorf("白名单应探测存活: %+v", rep.Whitelist)
 	}
-	// 订阅提取的爬虫站延迟探测结果应纳入诊断（含 TTFB）
+	// 爬虫站延迟探测结果应纳入诊断（含 TTFB）
 	var spiderResult *model.TestResult
 	for _, r := range rep.Sources {
-		if r.URL == srv.URL+"/sub.json" {
+		if r.URL == srv.URL+"/" {
 			spiderResult = r
 			break
 		}
@@ -166,21 +163,6 @@ sources:
 		t.Error("status.json 应包含爬虫站延迟探测结果")
 	} else if spiderResult.TTFBMs <= 0 {
 		t.Errorf("爬虫站探测应记录 TTFB，实际 %d", spiderResult.TTFBMs)
-	}
-	// 订阅式源抓取诊断应纳入 status.json
-	var subProbe model.SubscriptionProbe
-	foundSub := false
-	for _, p := range rep.Subscriptions {
-		if p.Name == "模拟订阅源" {
-			subProbe = p
-			foundSub = true
-			break
-		}
-	}
-	if !foundSub {
-		t.Error("status.json 应包含订阅抓取诊断")
-	} else if subProbe.Status != model.StatusOK || subProbe.Sites != 1 {
-		t.Errorf("订阅诊断错误: %+v", subProbe)
 	}
 }
 
