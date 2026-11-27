@@ -162,6 +162,7 @@ func (b *Builder) toSite(src model.SourceConfig, res *model.TestResult, whitelis
 		Changeable:  model.IntPtr(1),
 		Ext:         src.Ext,
 		Jar:         src.Jar,
+		JarTTFB:     src.JarTTFB,
 		Categories:  src.Categories,
 		SourceURL:   src.URL,
 	}
@@ -175,6 +176,10 @@ func (b *Builder) toSite(src model.SourceConfig, res *model.TestResult, whitelis
 	}
 
 	var tags []string
+	if s.IsSpider {
+		// csp/JAR/JS 站点服务端无法测播放，透明标注，不伪装成已测速源
+		tags = append(tags, "[未测速]")
+	}
 	if whitelisted {
 		// 白名单源免测速：置顶标注 [国内直连]
 		tags = append(tags, "[国内直连]")
@@ -371,18 +376,20 @@ func (b *Builder) buildSubscription(sites []model.Site, probes map[string]*model
 	// 未探测/失败的排在最后
 	spider = sortSpiderDiverse(spider)
 
-	// 名额分配：白名单与爬虫站优先保留，速度排序源填充剩余名额
-	room := topN - len(wl) - len(spider)
-	if room < 0 {
-		room = 0
-	}
-	if len(ranked) > room {
-		ranked = ranked[:room]
-	}
+	// 名额分配：白名单置顶 + 真实测速源按评分优先，爬虫站（未测速）只填剩余名额。
+	// 不能让数量庞大的未测速爬虫站挤掉实测源，否则“最快最优”无从谈起。
 	kept := make([]model.Site, 0, len(wl)+len(ranked)+len(spider))
 	kept = append(kept, wl...)
 	kept = append(kept, ranked...)
-	kept = append(kept, spider...)
+	if len(kept) > topN {
+		kept = kept[:topN]
+	}
+	if room := topN - len(kept); room > 0 {
+		if len(spider) > room {
+			spider = spider[:room]
+		}
+		kept = append(kept, spider...)
+	}
 	// key 是 TVBox 主键，必须唯一；上游不同订阅可能携带相同 key，保留首次出现者。
 	seenKeys := make(map[string]bool, len(kept))
 	unique := make([]model.Site, 0, len(kept))
@@ -408,19 +415,37 @@ func (b *Builder) buildSubscription(sites []model.Site, probes map[string]*model
 	}
 }
 
-// pickGlobalSpider 选取出现次数最多的 JAR 作为全局 spider（与原项目策略一致）。
-// 站点自带 jar 时优先生效；未声明 jar 的 csp 站点使用此处选出的全局 JAR。
+// pickGlobalSpider 选取“可用且响应最快”的 JAR 作为全局 spider。
+// 客户端首次加载 csp 站点需要下载该 JAR，因此延迟比出现次数更重要；
+// 相同延迟时再按出现次数、URL 字典序打破平局。
 func pickGlobalSpider(sites []model.Site) string {
-	counts := make(map[string]int, len(sites))
-	for _, s := range sites {
-		if s.Type != nil && s.Type.Value == 3 && s.Jar != "" {
-			counts[s.Jar]++
-		}
+	type jarStat struct {
+		n   int
+		sum int64
 	}
-	best, bestN := "", 0
-	for jar, n := range counts {
-		if n > bestN || (n == bestN && jar < best) {
-			best, bestN = jar, n
+	stats := make(map[string]*jarStat, len(sites))
+	for _, s := range sites {
+		if s.Type == nil || s.Type.Value != 3 || s.Jar == "" {
+			continue
+		}
+		st := stats[s.Jar]
+		if st == nil {
+			st = &jarStat{}
+			stats[s.Jar] = st
+		}
+		st.n++
+		ttfb := s.JarTTFB
+		if ttfb <= 0 {
+			ttfb = 9999 // 未探测到延迟的按最慢处理
+		}
+		st.sum += ttfb
+	}
+	best, bestAvg, bestN := "", int64(1<<62), 0
+	for jar, st := range stats {
+		avg := st.sum / int64(st.n)
+		if avg < bestAvg ||
+			(avg == bestAvg && (st.n > bestN || (st.n == bestN && jar < best))) {
+			best, bestAvg, bestN = jar, avg, st.n
 		}
 	}
 	return best

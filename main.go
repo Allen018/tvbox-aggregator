@@ -14,6 +14,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"io"
 	"log"
 	"net/http"
 	"os"
@@ -123,20 +124,28 @@ func run(sourcesPath, whitelistPath, discoverPath, discoveredOut, outDir, jarBas
 	log.Printf("加载源池 %d 个（人工采集站 %d / 爬虫站 %d，订阅提取 %d，发现源 %d），白名单 %d 个",
 		len(allSources), countCollect(poolSources), countSpider(poolSources), len(extractedSources), len(discovered), len(whitelist))
 
-	// 剔除依赖文件已 404 的爬虫站（如失效 jar / 相对 js 路径解析后的 404）
-	deadArtifacts := probeArtifacts(ctx, f, allSources)
-	if len(deadArtifacts) > 0 {
-		before := len(allSources)
-		kept := make([]model.SourceConfig, 0, before)
-		for _, src := range allSources {
-			if src.Type == "spider" && (deadArtifacts[artifactURL(src.Jar)] || deadArtifacts[artifactURL(src.API)]) {
+	// 剔除依赖文件已 404 的爬虫站，并记录 JAR 延迟供全局 spider 优选
+	artifacts := probeArtifacts(ctx, f, allSources)
+	before := len(allSources)
+	kept := make([]model.SourceConfig, 0, before)
+	for _, src := range allSources {
+		if src.Type == "spider" {
+			if info := artifacts[artifactURL(src.Jar)]; info != nil {
+				if info.Dead {
+					continue
+				}
+				src.JarTTFB = info.TTFBMs
+			}
+			if info := artifacts[artifactURL(src.API)]; info != nil && info.Dead {
 				continue
 			}
-			kept = append(kept, src)
 		}
-		log.Printf("依赖文件 404，剔除爬虫站 %d 个", before-len(kept))
-		allSources = kept
+		kept = append(kept, src)
 	}
+	if removed := before - len(kept); removed > 0 {
+		log.Printf("依赖文件 404，剔除爬虫站 %d 个", removed)
+	}
+	allSources = kept
 
 	// 白名单 URL 集合：命中白名单的采集站不做全量测速，改为存活探测
 	wlURLs := make(map[string]model.WhitelistEntry, len(whitelist))
@@ -230,6 +239,36 @@ func testSource(ctx context.Context, f *fetcher.Fetcher, prober *tester.Prober, 
 		return base
 	}
 
+	// 新鲜度：取列表中最新的 vod_time；超过 60 天直接判为陈旧源，不再浪费播放测速。
+	freshDays := -1
+	var newest time.Time
+	for _, item := range vl.List {
+		t := model.ParseVodTime(item.Time)
+		if !t.IsZero() && t.After(newest) {
+			newest = t
+		}
+	}
+	if !newest.IsZero() {
+		d := int(time.Since(newest).Hours() / 24)
+		if d < 0 {
+			d = 0
+		}
+		freshDays = d
+		base.FreshDays = d
+		if d > 60 {
+			base.Status = model.StatusStale
+			base.Error = fmt.Sprintf("影片资源陈旧，最新影片为 %d 天前", d)
+			return base
+		}
+	}
+
+	// 列表接口常不带播放地址（只有 vod_id），回退 ac=detail 补齐后再提取 m3u8
+	if len(fetcher.ExtractPlayURLs(vl, 1)) == 0 {
+		if detailed := f.FetchVodDetail(ctx, src.URL, src.Headers, vl.List); len(detailed) > 0 {
+			vl.List = detailed
+		}
+	}
+
 	playURLs := fetcher.ExtractPlayURLs(vl, probeSamples)
 	if len(playURLs) == 0 {
 		base.Error = "未提取到 m3u8 播放地址"
@@ -261,7 +300,14 @@ func testSource(ctx context.Context, f *fetcher.Fetcher, prober *tester.Prober, 
 		base.Status = model.StatusAd
 		base.AdTag = true
 	}
-	base.Score = model.Score(base.SpeedMBps, base.TTFBMs)
+	base.Score = model.Score(model.ScoreInput{
+		SpeedMBps: base.SpeedMBps,
+		TTFBMs:    base.TTFBMs,
+		FreshDays: freshDays,
+		Stability: 1,
+		Ad:        base.AdTag,
+		JarOK:     true, // 采集站不依赖 JAR
+	})
 	return base
 }
 
@@ -467,7 +513,8 @@ func toSubscriptionSite(s model.Site, subURL string) model.SourceConfig {
 		Ext:        s.Ext,
 		Categories: s.Categories,
 	}
-	if s.Type != nil && (s.Type.Value == 1 || s.Type.Value == 3) {
+	// 只有 type 3（csp/JAR/JS）才是爬虫站；type 0/1 是标准采集 API，必须走真实测速。
+	if s.Type != nil && s.Type.Value == 3 {
 		src.Type = "spider"
 		src.URL = subURL
 	}
@@ -528,9 +575,15 @@ func artifactURL(raw string) string {
 	return raw
 }
 
-// probeArtifacts 探测爬虫站依赖的 jar/js/py 文件是否真实存在。
+// artifactInfo 依赖文件的探测结果：Dead 表示确定 404/410，TTFBMs 用于优选全局 JAR。
+type artifactInfo struct {
+	Dead   bool
+	TTFBMs int64
+}
+
+// probeArtifacts 探测爬虫站依赖的 jar/js/py 文件是否真实存在，并记录响应延迟。
 // 仅对确定的 404/410 判死；403/5xx/超时一律保留（可能是海外封锁或临时故障）。
-func probeArtifacts(ctx context.Context, f *fetcher.Fetcher, sources []model.SourceConfig) map[string]bool {
+func probeArtifacts(ctx context.Context, f *fetcher.Fetcher, sources []model.SourceConfig) map[string]*artifactInfo {
 	candidates := map[string]bool{}
 	for _, s := range sources {
 		if s.Type != "spider" {
@@ -543,7 +596,7 @@ func probeArtifacts(ctx context.Context, f *fetcher.Fetcher, sources []model.Sou
 			candidates[u] = true
 		}
 	}
-	dead := make(map[string]bool)
+	infos := make(map[string]*artifactInfo, len(candidates))
 	var wg sync.WaitGroup
 	var mu sync.Mutex
 	sem := make(chan struct{}, 10)
@@ -555,16 +608,43 @@ func probeArtifacts(ctx context.Context, f *fetcher.Fetcher, sources []model.Sou
 			defer func() { <-sem }()
 			pctx, cancel := context.WithTimeout(ctx, 8*time.Second)
 			defer cancel()
-			_, status, err := f.FetchRaw(pctx, u, nil)
-			if err == nil && (status == http.StatusNotFound || status == http.StatusGone) {
-				mu.Lock()
-				dead[u] = true
-				mu.Unlock()
+
+			dead, ttfb := false, int64(9999)
+			req, err := http.NewRequestWithContext(pctx, http.MethodHead, u, nil)
+			if err == nil {
+				start := time.Now()
+				resp, err := f.Client().Do(req)
+				if err == nil {
+					ttfb = time.Since(start).Milliseconds()
+					resp.Body.Close()
+					if resp.StatusCode == http.StatusNotFound || resp.StatusCode == http.StatusGone {
+						dead = true
+					}
+				}
 			}
+			// HEAD 不可用时用 GET 取前 1KB 测延迟
+			if !dead && ttfb >= 9999 {
+				req, err := http.NewRequestWithContext(pctx, http.MethodGet, u, nil)
+				if err == nil {
+					start := time.Now()
+					resp, err := f.Client().Do(req)
+					if err == nil {
+						ttfb = time.Since(start).Milliseconds()
+						_, _ = io.CopyN(io.Discard, resp.Body, 1<<10)
+						resp.Body.Close()
+						if resp.StatusCode == http.StatusNotFound || resp.StatusCode == http.StatusGone {
+							dead = true
+						}
+					}
+				}
+			}
+			mu.Lock()
+			infos[u] = &artifactInfo{Dead: dead, TTFBMs: ttfb}
+			mu.Unlock()
 		}(u)
 	}
 	wg.Wait()
-	return dead
+	return infos
 }
 
 // ---------------------------------------------------------------------------

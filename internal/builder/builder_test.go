@@ -57,30 +57,30 @@ func TestBuildSubscriptionCleaning(t *testing.T) {
 	}
 }
 
-func TestBuildSubscriptionSpiderGuaranteed(t *testing.T) {
+func TestBuildSubscriptionSpiderFillsRemaining(t *testing.T) {
 	b := New("", "dist")
 	var ranked []model.Site
-	for i := 0; i < 10; i++ {
+	for i := 0; i < 3; i++ {
 		ranked = append(ranked, model.Site{
 			Name:      fmt.Sprintf("影视源%d", i),
 			SourceURL: fmt.Sprintf("http://r%d.com/api", i),
 			Status:    model.StatusOK,
-			Score:     float64(10 - i),
+			Score:     float64(3 - i),
 		})
 	}
 	sites := append(ranked, model.Site{
 		Name: "剧集爬虫", SourceURL: "http://spider.com/", Type: model.IntPtr(1), IsSpider: true,
 	})
-	// topN=5：爬虫站保底占 1 席，速度源仅取前 4
+	// topN=5：3 个实测源全部保留，爬虫站只填剩余名额
 	cfg := b.buildSubscription(sites, nil, 5)
-	if len(cfg.Sites) != 5 {
-		t.Fatalf("期望 5 个，实际 %d", len(cfg.Sites))
+	if len(cfg.Sites) != 4 {
+		t.Fatalf("期望 4 个，实际 %d", len(cfg.Sites))
 	}
-	if cfg.Sites[4].Name != "剧集爬虫" {
-		t.Errorf("爬虫站应保底保留在末位，实际 %q", cfg.Sites[4].Name)
+	if cfg.Sites[3].Name != "剧集爬虫" {
+		t.Errorf("爬虫站应排在实测源之后，实际 %q", cfg.Sites[3].Name)
 	}
-	if cfg.Sites[0].Score != 10 || cfg.Sites[3].Score != 7 {
-		t.Errorf("速度源应按评分降序填充剩余名额: %+v", cfg.Sites)
+	if cfg.Sites[0].Score != 3 || cfg.Sites[2].Score != 1 {
+		t.Errorf("实测源应按评分降序排列: %+v", cfg.Sites)
 	}
 }
 

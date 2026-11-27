@@ -21,6 +21,7 @@ const (
 	StatusBlocked = "blocked" // 海外 IP 封锁（403/503）
 	StatusFailed  = "failed"  // 死链 / 超时 / 无有效播放流
 	StatusAd      = "ad"      // 含广告特征（降权保留）
+	StatusStale   = "stale"   // 影片资源陈旧（latest vod_time 超阈值）
 	StatusUnknown = "unknown" // 爬虫源免测 / 未参与测速
 )
 
@@ -131,6 +132,21 @@ func stringField(raw map[string]json.RawMessage, keys ...string) string {
 	return ""
 }
 
+// idField 提取 ID 字段，兼容数字型 vod_id（如 12345）。
+func idField(raw map[string]json.RawMessage, keys ...string) string {
+	for _, k := range keys {
+		v, ok := raw[k]
+		if !ok {
+			continue
+		}
+		var f FlexString
+		if err := f.UnmarshalJSON(v); err == nil && strings.TrimSpace(string(f)) != "" {
+			return strings.TrimSpace(string(f))
+		}
+	}
+	return ""
+}
+
 // intField 从原始 JSON 对象中按候选键依次提取整数字段（宽容解析）。
 func intField(raw map[string]json.RawMessage, keys ...string) *FlexInt {
 	for _, k := range keys {
@@ -189,6 +205,7 @@ type Site struct {
 	Score     float64  `json:"-"`
 	Status    string   `json:"-"`
 	LatencyMs int64    `json:"-"` // 爬虫站延迟探测结果（TTFB），用于订阅内排序
+	JarTTFB   int64    `json:"-"` // 依赖 JAR 的探测延迟（毫秒），用于优选全局 spider
 	IsSpider  bool     `json:"-"` // 是否走爬虫站免测通道（不能仅用 type 判断，JSON CMS 也是 type 1）
 }
 
@@ -255,9 +272,11 @@ func (c *TVBoxConfig) UnmarshalJSON(data []byte) error {
 
 // VodItem 是采集站 API 返回的单个视频条目。
 type VodItem struct {
+	ID       string // vod_id / id，用于 ac=detail 取播放地址
 	Name     string
 	PlayFrom string
 	PlayURL  string
+	Time     string // vod_time / vod_addtime，原始时间字符串
 }
 
 // UnmarshalJSON 兼容 vod_name/name/title、vod_play_url/play_url 等异构字段。
@@ -266,10 +285,36 @@ func (v *VodItem) UnmarshalJSON(data []byte) error {
 	if err := json.Unmarshal(data, &raw); err != nil {
 		return err
 	}
+	v.ID = idField(raw, "vod_id", "id", "vodId")
 	v.Name = stringField(raw, "vod_name", "name", "title")
 	v.PlayFrom = stringField(raw, "vod_play_from", "play_from", "from")
 	v.PlayURL = stringField(raw, "vod_play_url", "play_url", "playurl", "url")
+	v.Time = stringField(raw, "vod_time", "vod_addtime", "vod_date", "time")
 	return nil
+}
+
+// ParseVodTime 解析苹果 CMS 的 vod_time：支持 Unix 秒/毫秒时间戳与常见日期格式。
+// 解析失败返回零值时间。
+func ParseVodTime(s string) time.Time {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return time.Time{}
+	}
+	if n, err := strconv.ParseInt(s, 10, 64); err == nil && n > 0 {
+		if n > 1e12 {
+			n /= 1000
+		}
+		return time.Unix(n, 0)
+	}
+	for _, layout := range []string{
+		"2006-01-02 15:04:05", "2006-01-02", "2006/01/02 15:04:05",
+		"2006/01/02", "2006-01-02T15:04:05", "2006-01-02T15:04:05Z07:00",
+	} {
+		if t, err := time.ParseInLocation(layout, s, time.Local); err == nil {
+			return t
+		}
+	}
+	return time.Time{}
 }
 
 // VodList 是采集站 API 的列表响应。
@@ -321,6 +366,7 @@ type TestResult struct {
 	RangeOK   bool      `json:"range_ok"`
 	Samples   int       `json:"samples"`
 	AdTag     bool      `json:"ad_tag"`
+	FreshDays int       `json:"fresh_days"` // 最新影片距今天数；-1 表示未知
 	Score     float64   `json:"score"`
 	Error     string    `json:"error,omitempty"`
 	CheckedAt time.Time `json:"checked_at"`
@@ -342,6 +388,7 @@ type SourceConfig struct {
 	Skip       bool              `yaml:"skip"`        // 跳过测速（仍参与配置输出）
 	LocalJar   bool              `yaml:"local_jar"`   // 爬虫站 spider 地址是否重写为本地托管（需 jar 已放入仓库 jar/ 目录）
 	OutputType int               `yaml:"output_type"` // 输出用类型数值（0/1/3），订阅提取时保留原始类型，客户端需要原始 type
+	JarTTFB    int64             `yaml:"-"`           // 依赖 JAR 的探测延迟（毫秒），用于优选全局 spider
 }
 
 // WhitelistEntry 国内保底源白名单项（config/whitelist.yaml）。
@@ -376,12 +423,59 @@ type SubscriptionProbe struct {
 	CheckedAt time.Time `json:"checked_at"`
 }
 
-// Score 综合评分：实测带宽 × 0.7 + 响应速度 × 0.3。
-// 响应速度将 TTFB 归一化到 0~10（100ms 记满分），与带宽量纲匹配。
-func Score(speedMBps float64, ttfbMs int64) float64 {
-	ttfbScore := 0.0
-	if ttfbMs > 0 {
-		ttfbScore = math.Min(1000.0/float64(ttfbMs), 10.0)
+// ScoreInput 多维评分输入。无法测速的 type 3 站点速度/新鲜度记为未知，
+// 由调用方把 SpeedMBps/FreshKnown 置零，评分自然落后于实测源。
+type ScoreInput struct {
+	SpeedMBps float64
+	TTFBMs    int64
+	FreshDays int     // -1 表示未知
+	Stability float64 // 0~1，本轮默认 1
+	JarOK     bool    // 依赖 JAR 可用（对 type 3 有区分度）
+	Ad        bool
+}
+
+// Score 归一化多维评分（0~100）：
+// 速度 40% + 新鲜度 20% + TTFB 15% + 稳定性 10% + JAR 可用性 5% + 广告降权 5%。
+// 未设置的维度按中性值 0.5 处理，避免未知信息被当成最差。
+func Score(in ScoreInput) float64 {
+	// 速度：log 归一化到 20MB/s，避免单个高速源碾压
+	speed := 0.5
+	if in.SpeedMBps > 0 {
+		speed = math.Log1p(in.SpeedMBps) / math.Log1p(20)
+		if speed > 1 {
+			speed = 1
+		}
 	}
-	return speedMBps*0.7 + ttfbScore*0.3
+	// 新鲜度：≤7 天满分，30 天 0.7，60 天 0.3，>60 天 0；未知取 0.5
+	fresh := 0.5
+	if in.FreshDays >= 0 {
+		switch d := in.FreshDays; {
+		case d <= 7:
+			fresh = 1
+		case d <= 30:
+			fresh = 1 - float64(d-7)/23*0.3
+		case d <= 60:
+			fresh = 0.7 - float64(d-30)/30*0.4
+		default:
+			fresh = 0
+		}
+	}
+	// TTFB：5s 以上记 0
+	ttfb := 0.5
+	if in.TTFBMs >= 0 {
+		ttfb = 1 - math.Min(float64(in.TTFBMs), 5000)/5000
+	}
+	stable := in.Stability
+	if stable <= 0 || stable > 1 {
+		stable = 0.5
+	}
+	jar := 0.5
+	if in.JarOK {
+		jar = 1
+	}
+	ad := 1.0
+	if in.Ad {
+		ad = 0
+	}
+	return 100 * (0.40*speed + 0.20*fresh + 0.15*ttfb + 0.10*stable + 0.05*jar + 0.05*ad)
 }

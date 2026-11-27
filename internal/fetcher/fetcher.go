@@ -84,6 +84,40 @@ func (f *Fetcher) FetchVodList(ctx context.Context, url string, headers map[stri
 	return &vl, nil
 }
 
+// FetchVodDetail 当列表接口不返回播放地址时，按 vod_id 拉取 detail 补齐。
+// 仅取前 3 个视频，失败项跳过，不中断整体。
+func (f *Fetcher) FetchVodDetail(ctx context.Context, apiURL string, headers map[string]string, list []model.VodItem) []model.VodItem {
+	base := strings.TrimSpace(apiURL)
+	if i := strings.Index(base, "?"); i >= 0 {
+		base = base[:i]
+	}
+	base = strings.TrimRight(base, "/")
+	out := make([]model.VodItem, 0, len(list))
+	for i, item := range list {
+		if i >= 3 || item.ID == "" {
+			continue
+		}
+		detailURL := base + "?ac=detail&ids=" + item.ID
+		body, status, err := f.FetchRaw(ctx, detailURL, headers)
+		if err != nil || status != http.StatusOK {
+			continue
+		}
+		var dl model.VodList
+		if err := json.Unmarshal(body, &dl); err != nil {
+			continue
+		}
+		for _, d := range dl.List {
+			if d.PlayURL != "" {
+				if d.Time == "" {
+					d.Time = item.Time
+				}
+				out = append(out, d)
+			}
+		}
+	}
+	return out
+}
+
 // ExtractPlayURLs 从视频列表中提取前 max 个 m3u8 播放地址。
 //
 // 播放地址常见格式为 "第1集$https://x.m3u8#第2集$https://y.m3u8"，

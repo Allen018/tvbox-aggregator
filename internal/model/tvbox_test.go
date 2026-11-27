@@ -138,16 +138,17 @@ func TestVodListVariants(t *testing.T) {
 }
 
 func TestScore(t *testing.T) {
-	// 10MB/s + 100ms TTFB：带宽分 7 + 速度分 3 = 10
-	if got := Score(10, 100); math.Abs(got-10.0) > 1e-9 {
-		t.Errorf("Score(10,100)=%f，期望 10", got)
+	good := Score(ScoreInput{SpeedMBps: 10, TTFBMs: 100, FreshDays: 1, Stability: 1, JarOK: true})
+	if good < 60 || good > 100 {
+		t.Errorf("优质源评分异常: %f", good)
 	}
-	// TTFB 归一化上限 10
-	if got := Score(100, 10); math.Abs(got-73.0) > 1e-9 {
-		t.Errorf("Score(100,10)=%f，期望 73", got)
+	bad := Score(ScoreInput{SpeedMBps: 0.1, TTFBMs: 5000, FreshDays: 100, Stability: 0.2, Ad: true})
+	if bad >= good {
+		t.Errorf("劣质源评分应低于优质源: bad=%f good=%f", bad, good)
 	}
-	// 无数据
-	if got := Score(0, 0); got != 0 {
-		t.Errorf("Score(0,0)=%f，期望 0", got)
+	unknown := Score(ScoreInput{})
+	if unknown <= 0 {
+		t.Errorf("未知维度应按中性值处理，实际 %f", unknown)
 	}
+	_ = math.Abs
 }
