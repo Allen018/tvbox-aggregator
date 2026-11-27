@@ -17,11 +17,11 @@ import (
 
 // 源测试状态常量。
 const (
-	StatusOK      = "ok"       // 测速成功
-	StatusBlocked = "blocked"  // 海外 IP 封锁（403/503）
-	StatusFailed  = "failed"   // 死链 / 超时 / 无有效播放流
-	StatusAd      = "ad"       // 含广告特征（降权保留）
-	StatusUnknown = "unknown"  // 爬虫源免测 / 未参与测速
+	StatusOK      = "ok"      // 测速成功
+	StatusBlocked = "blocked" // 海外 IP 封锁（403/503）
+	StatusFailed  = "failed"  // 死链 / 超时 / 无有效播放流
+	StatusAd      = "ad"      // 含广告特征（降权保留）
+	StatusUnknown = "unknown" // 爬虫源免测 / 未参与测速
 )
 
 // HTTPStatusError 携带 HTTP 状态码的类型化错误，供上层区分海外封锁/死链。
@@ -146,23 +146,42 @@ func intField(raw map[string]json.RawMessage, keys ...string) *FlexInt {
 	return nil
 }
 
+// stringSliceField 从原始 JSON 对象中按候选键依次提取字符串数组字段（宽容解析）。
+func stringSliceField(raw map[string]json.RawMessage, keys ...string) []string {
+	for _, k := range keys {
+		v, ok := raw[k]
+		if !ok {
+			continue
+		}
+		var items []string
+		if err := json.Unmarshal(v, &items); err == nil && len(items) > 0 {
+			return items
+		}
+	}
+	return nil
+}
+
 // ---------------------------------------------------------------------------
 // TVBox 客户端配置
 // ---------------------------------------------------------------------------
 
 // Site 是输出到 TVBox 客户端的单个站点配置，字段与主流客户端兼容。
 type Site struct {
+	// Key 是客户端必填主键，缺失会导致站点被整批忽略，必须输出。
+	Key         string   `json:"key"`
 	Name        string   `json:"name"`
-	Type        *FlexInt `json:"type"` // 0=采集站 1=爬虫站
+	Type        *FlexInt `json:"type"` // 0=XML 采集 1=JSON 采集 3=爬虫 4=扩展
 	API         string   `json:"api,omitempty"`
 	Searchable  *FlexInt `json:"searchable,omitempty"`
 	QuickSearch *FlexInt `json:"quickSearch,omitempty"`
 	Filterable  *FlexInt `json:"filterable,omitempty"`
+	Changeable  *FlexInt `json:"changeable,omitempty"`
 	PlayerType  *FlexInt `json:"playerType,omitempty"`
 	Ext         string   `json:"ext,omitempty"`
-	Jar         string   `json:"jar,omitempty"`
+	Jar         string   `json:"jar,omitempty"` // 站点级 JAR，TVBox 实际读取的字段
 	Spider      string   `json:"spider,omitempty"`
 	Group       string   `json:"group,omitempty"` // 多仓版分组标注
+	Categories  []string `json:"categories,omitempty"`
 
 	// 聚合器内部字段，不输出到 JSON
 	SourceURL string   `json:"-"`
@@ -170,6 +189,7 @@ type Site struct {
 	Score     float64  `json:"-"`
 	Status    string   `json:"-"`
 	LatencyMs int64    `json:"-"` // 爬虫站延迟探测结果（TTFB），用于订阅内排序
+	IsSpider  bool     `json:"-"` // 是否走爬虫站免测通道（不能仅用 type 判断，JSON CMS 也是 type 1）
 }
 
 // UnmarshalJSON 兼容 api/url/api_url、vod 名称异构等字段命名，逐字段宽容提取。
@@ -178,33 +198,46 @@ func (s *Site) UnmarshalJSON(data []byte) error {
 	if err := json.Unmarshal(data, &raw); err != nil {
 		return err
 	}
+	s.Key = stringField(raw, "key")
 	s.Name = stringField(raw, "name", "site", "title", "key")
 	s.Type = intField(raw, "type")
 	s.API = stringField(raw, "api", "url", "api_url", "apiUrl")
 	s.Searchable = intField(raw, "searchable")
 	s.QuickSearch = intField(raw, "quickSearch", "quick_search")
 	s.Filterable = intField(raw, "filterable", "filter")
+	s.Changeable = intField(raw, "changeable")
 	s.PlayerType = intField(raw, "playerType", "player_type")
 	s.Ext = stringField(raw, "ext", "extend", "extends")
 	s.Jar = stringField(raw, "jar")
 	s.Spider = stringField(raw, "spider")
 	s.Group = stringField(raw, "group", "category")
+	s.Categories = stringSliceField(raw, "categories")
 	return nil
 }
 
 // TVBoxConfig 是完整的 TVBox 订阅配置（单仓/多仓通用）。
+// Spider 为全局爬虫 JAR；Lives/Parses 保持为空数组以兼容客户端对顶层字段的期待。
 type TVBoxConfig struct {
-	Sites []Site `json:"sites"`
+	Spider string            `json:"spider,omitempty"`
+	Sites  []Site            `json:"sites"`
+	Lives  []json.RawMessage `json:"lives"`
+	Parses []json.RawMessage `json:"parses"`
 }
 
 // UnmarshalJSON 解析订阅配置；单条站点解析失败时跳过该条，不中断整体（脏数据隔离）。
 func (c *TVBoxConfig) UnmarshalJSON(data []byte) error {
 	var raw struct {
-		Sites []json.RawMessage `json:"sites"`
+		Spider string            `json:"spider"`
+		Sites  []json.RawMessage `json:"sites"`
+		Lives  []json.RawMessage `json:"lives"`
+		Parses []json.RawMessage `json:"parses"`
 	}
 	if err := json.Unmarshal(data, &raw); err != nil {
 		return err
 	}
+	c.Spider = raw.Spider
+	c.Lives = raw.Lives
+	c.Parses = raw.Parses
 	c.Sites = make([]Site, 0, len(raw.Sites))
 	for _, m := range raw.Sites {
 		var s Site
@@ -222,10 +255,11 @@ func (c *TVBoxConfig) UnmarshalJSON(data []byte) error {
 
 // VodItem 是采集站 API 返回的单个视频条目。
 type VodItem struct {
-	Name      string
+	Name     string
 	PlayFrom string
-	PlayURL   string
+	PlayURL  string
 }
+
 // UnmarshalJSON 兼容 vod_name/name/title、vod_play_url/play_url 等异构字段。
 func (v *VodItem) UnmarshalJSON(data []byte) error {
 	var raw map[string]json.RawMessage
@@ -295,15 +329,19 @@ type TestResult struct {
 // SourceConfig 源池配置项（config/sources.yaml）。
 type SourceConfig struct {
 	Name       string            `yaml:"name"`
+	Key        string            `yaml:"key"` // 站点唯一标识；订阅提取时保留上游原始 key
 	URL        string            `yaml:"url"`
-	API        string            `yaml:"api"` // 站点 api 地址（采集站 API / 爬虫站 spider 名或 JS 地址）；缺省用 URL
-	Type       string            `yaml:"type"` // collect=采集站（可测速）spider=爬虫站（免测）subscription=订阅式源（抓取配置提取站点）
+	API        string            `yaml:"api"`      // 站点 api 地址（采集站 API / 爬虫站 spider 名或 JS 地址）；缺省用 URL
+	Type       string            `yaml:"type"`     // collect=采集站（可测速）spider=爬虫站（免测）subscription=订阅式源（抓取配置提取站点）
 	Category   string            `yaml:"category"` // 分组标注（预留）
 	Spider     string            `yaml:"spider"`   // 爬虫站 spider jar 原始地址（可被本地化重写）
-	Headers    map[string]string `yaml:"headers"`  // 按源自定义请求头（反爬校验）
-	Skip       bool              `yaml:"skip"`     // 跳过测速（仍参与配置输出）
-	LocalJar   bool              `yaml:"local_jar"` // 爬虫站 spider 地址是否重写为本地托管（需 jar 已放入仓库 jar/ 目录）
-	OutputType int               `yaml:"-"`         // 输出用类型数值（0/1/3），订阅提取时保留原始类型，客户端需要原始 type
+	Jar        string            `yaml:"jar"`      // 站点级 JAR 地址（客户端读取字段）
+	Ext        string            `yaml:"ext"`      // 爬虫扩展参数
+	Categories []string          `yaml:"categories"`
+	Headers    map[string]string `yaml:"headers"`     // 按源自定义请求头（反爬校验）
+	Skip       bool              `yaml:"skip"`        // 跳过测速（仍参与配置输出）
+	LocalJar   bool              `yaml:"local_jar"`   // 爬虫站 spider 地址是否重写为本地托管（需 jar 已放入仓库 jar/ 目录）
+	OutputType int               `yaml:"output_type"` // 输出用类型数值（0/1/3），订阅提取时保留原始类型，客户端需要原始 type
 }
 
 // WhitelistEntry 国内保底源白名单项（config/whitelist.yaml）。
@@ -311,6 +349,7 @@ type SourceConfig struct {
 type WhitelistEntry struct {
 	Name    string            `yaml:"name"`
 	URL     string            `yaml:"url"`
+	Type    int               `yaml:"type"` // 输出类型：0=XML 采集，1=JSON 采集（默认 1）
 	Note    string            `yaml:"note"`
 	Headers map[string]string `yaml:"headers"`
 }
@@ -331,8 +370,8 @@ type SubscriptionProbe struct {
 	URL       string    `json:"url"`
 	Status    string    `json:"status"` // ok=抓取成功 failed=失败
 	TTFBMs    int64     `json:"ttfb_ms"`
-	Sites     int       `json:"sites"`  // 提取到的站点数
-	URLs      int       `json:"urls"`   // 展开的子订阅地址数
+	Sites     int       `json:"sites"` // 提取到的站点数
+	URLs      int       `json:"urls"`  // 展开的子订阅地址数
 	Error     string    `json:"error,omitempty"`
 	CheckedAt time.Time `json:"checked_at"`
 }

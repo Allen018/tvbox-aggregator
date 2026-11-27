@@ -102,7 +102,7 @@ sources:
 	if !strings.Contains(sub.Sites[1].Name, "🚀") {
 		t.Errorf("订阅版次位应为测速成功源，实际 name=%q", sub.Sites[1].Name)
 	}
-	// 末位：订阅提取的爬虫站保底，全局 spider 相对路径已解析且未被重写
+	// 末位：订阅提取的爬虫站保底，上游 key 保留，jar 解析为绝对地址且写入客户端读取的字段
 	spider := sub.Sites[2]
 	if !strings.Contains(spider.Name, "订阅动漫站") {
 		t.Errorf("订阅版末位应为订阅提取的爬虫站，实际 name=%q", spider.Name)
@@ -110,9 +110,21 @@ sources:
 	if spider.Type == nil || spider.Type.Value != 3 {
 		t.Errorf("订阅提取的 csp 源应保留原始 type=3，实际 %+v", spider.Type)
 	}
-	if spider.Spider != srv.URL+"/x.jar" {
-		t.Errorf("订阅提取 spider 应解析为绝对地址且不重写，实际 %q", spider.Spider)
+	if spider.Key != "sk" {
+		t.Errorf("订阅提取的站点 key 必须保留，实际 %q", spider.Key)
 	}
+	if spider.Jar != srv.URL+"/x.jar" {
+		t.Errorf("订阅提取 jar 应解析为绝对地址且不重写，实际 %q", spider.Jar)
+	}
+	// 顶层 spider 必须存在，供未声明 jar 的 csp 站点加载
+	if sub.Spider != srv.URL+"/x.jar" {
+		t.Errorf("顶层 spider 应设为全局 jar，实际 %q", sub.Spider)
+	}
+	if sub.Lives == nil || sub.Parses == nil {
+		t.Error("顶层 lives/parses 应输出为空数组而非 null")
+	}
+	// 严格客户端兼容性校验，防止再次产出 TVBox 无法加载的配置
+	validateTVBoxCompatibility(t, &sub)
 	// 清洗：封锁站不应出现
 	for _, s := range sub.Sites {
 		if strings.Contains(s.Name, "封锁") {
@@ -140,8 +152,8 @@ sources:
 			Spider    int `json:"spider"`
 			Whitelist int `json:"whitelist"`
 		} `json:"summary"`
-		Sources       []*model.TestResult        `json:"sources"`
-		Whitelist     []model.WhitelistProbe     `json:"whitelist"`
+		Sources       []*model.TestResult       `json:"sources"`
+		Whitelist     []model.WhitelistProbe    `json:"whitelist"`
 		Subscriptions []model.SubscriptionProbe `json:"subscriptions"`
 	}
 	if err := json.Unmarshal(statusData, &rep); err != nil {
@@ -181,6 +193,34 @@ sources:
 		t.Error("status.json 应包含订阅抓取诊断")
 	} else if subProbe.Status != model.StatusOK || subProbe.Sites != 1 {
 		t.Errorf("订阅诊断错误: %+v", subProbe)
+	}
+}
+
+// validateTVBoxCompatibility 按 TVBox/影视仓的必填字段校验产物：
+// key 必填且唯一；type 必填；api 必填；type=3 需 jar 或顶层 spider。
+func validateTVBoxCompatibility(t *testing.T, cfg *model.TVBoxConfig) {
+	t.Helper()
+	if len(cfg.Sites) == 0 {
+		t.Fatal("产物站点为空，客户端将没有线路")
+	}
+	keys := make(map[string]bool, len(cfg.Sites))
+	for i, s := range cfg.Sites {
+		if s.Key == "" {
+			t.Errorf("第 %d 个站点缺少 key: %+v", i, s)
+		}
+		if keys[s.Key] {
+			t.Errorf("重复 key %q", s.Key)
+		}
+		keys[s.Key] = true
+		if s.Type == nil || !s.Type.Set {
+			t.Errorf("第 %d 个站点缺少 type", i)
+		}
+		if s.API == "" {
+			t.Errorf("第 %d 个站点缺少 api", i)
+		}
+		if s.Type != nil && s.Type.Value == 3 && s.Jar == "" && cfg.Spider == "" {
+			t.Errorf("type=3 站点 %q 无 jar 且顶层无 spider", s.Name)
+		}
 	}
 }
 

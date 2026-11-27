@@ -5,6 +5,53 @@
 #
 # 说明：白名单面向**单个源**（采集站 API 或订阅提取出的站点地址），
 # 不适用于订阅式源（订阅是站点组，其内部站点通过订阅抓取自动入池）。
-# 当前订阅式源已覆盖主流生态，白名单可留空，发现优质单源后按需添加。
+#
+# 保底直连采集站：不依赖 spider JAR，客户端开箱即用。
+# type: 1=JSON CMS（provide/vod），0=XML CMS（provide/vod/at/xml/）。
+# 这些地址用于即使爬虫 JAR 全部失效时仍有线路；如已失效请直接删除对应条目。
 
-whitelist: []
+whitelist:
+  - name: "保底-360采集"
+    url: "https://360zy.com/api.php/provide/vod"
+    type: 1
+    note: "原项目简洁版常用源，JSON CMS"
+
+  - name: "保底-奶香采集"
+    url: "https://naixxzy.com/api.php/provide/vod/"
+    type: 1
+    note: "原项目简洁版常用源，JSON CMS"
+
+  - name: "保底-鸡坤采集"
+    url: "https://jkunzyapi.com/api.php/provide/vod/"
+    type: 1
+    note: "原项目简洁版常用源，JSON CMS"
+
+  - name: "保底-魔都采集"
+    url: "https://www.mdzyapi.com/api.php/provide/vod/?ac=list"
+    type: 1
+    note: "原项目简洁版常用源，JSON CMS"
+
+  - name: "保底-如意采集"
+    url: "http://cj.rycjapi.com/api.php/provide/vod"
+    type: 1
+    note: "原项目简洁版常用源，JSON CMS"
+
+  - name: "保底-如意XML"
+    url: "https://cj.rycjapi.com/api.php/provide/vod/at/xml/"
+    type: 0
+    note: "XML CMS，type=0"
+
+  - name: "保底-索尼采集"
+    url: "https://suoniapi.com/api.php/provide/vod/?ac=list"
+    type: 1
+    note: "原项目置顶源，JSON CMS"
+
+  - name: "保底-暴风采集"
+    url: "https://app.bfzyapi.com/api.php/provide/vod/"
+    type: 1
+    note: "JSON CMS"
+
+  - name: "保底-可可采集"
+    url: "https://kekezy1.com/api.php/provide/vod/?ac=list"
+    type: 1
+    note: "JSON CMS"

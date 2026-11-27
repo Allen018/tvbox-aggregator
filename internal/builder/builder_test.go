@@ -10,19 +10,19 @@ import (
 func TestRewriteJar(t *testing.T) {
 	b := New("https://cdn.example.com/jar", "dist")
 	s := model.Site{
-		Name:   "爬虫站",
-		Type:   model.IntPtr(1),
-		Spider: "https://upstream.example.com/spider/abc.jar",
+		Name: "爬虫站",
+		Type: model.IntPtr(3),
+		Jar:  "https://upstream.example.com/spider/abc.jar;md5;deadbeef",
 	}
 	got := b.rewriteJar(s)
-	if got.Spider != "https://cdn.example.com/jar/abc.jar" {
-		t.Errorf("spider 重写错误: %q", got.Spider)
+	if got.Jar != "https://cdn.example.com/jar/abc.jar" {
+		t.Errorf("jar 重写错误: %q", got.Jar)
 	}
 
 	// 无基础地址时不重写
 	b2 := New("", "dist")
 	got2 := b2.rewriteJar(s)
-	if got2.Spider != s.Spider {
+	if got2.Jar != s.Jar {
 		t.Error("无 JarBaseURL 时不应重写")
 	}
 }
@@ -39,7 +39,7 @@ func TestBuildSubscriptionCleaning(t *testing.T) {
 		{Name: "测速剧圈", SourceURL: "http://ok.com/api", Status: model.StatusOK, Score: 5.0},
 		{Name: "含广告影视", SourceURL: "http://ad.com/api", Status: model.StatusAd, Score: 9.0},
 		{Name: "失效剧集", SourceURL: "http://fail.com/api", Status: model.StatusFailed, Score: 0},
-		{Name: "爬虫动漫", SourceURL: "http://spider.com/", Type: model.IntPtr(1)},
+		{Name: "爬虫动漫", SourceURL: "http://spider.com/", Type: model.IntPtr(1), IsSpider: true},
 	}
 	cfg := b.buildSubscription(sites, probes, 15)
 	if len(cfg.Sites) != 3 {
@@ -69,7 +69,7 @@ func TestBuildSubscriptionSpiderGuaranteed(t *testing.T) {
 		})
 	}
 	sites := append(ranked, model.Site{
-		Name: "剧集爬虫", SourceURL: "http://spider.com/", Type: model.IntPtr(1),
+		Name: "剧集爬虫", SourceURL: "http://spider.com/", Type: model.IntPtr(1), IsSpider: true,
 	})
 	// topN=5：爬虫站保底占 1 席，速度源仅取前 4
 	cfg := b.buildSubscription(sites, nil, 5)
@@ -97,11 +97,11 @@ func TestBuildSubscriptionSpiderDiverseSort(t *testing.T) {
 	}
 	// 爬虫站：快订阅(2个站点，故意乱序输入验证组内排序)、慢订阅(1个)、未探测、失败
 	sites := append(ranked,
-		model.Site{Name: "快B剧", SourceURL: "http://sub2.com/", Type: model.IntPtr(1), Status: model.StatusOK, LatencyMs: 120},
-		model.Site{Name: "快A剧", SourceURL: "http://sub2.com/", Type: model.IntPtr(1), Status: model.StatusOK, LatencyMs: 120},
-		model.Site{Name: "慢影", SourceURL: "http://sub1.com/", Type: model.IntPtr(1), Status: model.StatusOK, LatencyMs: 800},
-		model.Site{Name: "未探测影视", SourceURL: "http://sub3.com/", Type: model.IntPtr(1)},
-		model.Site{Name: "失败剧集", SourceURL: "http://sub4.com/", Type: model.IntPtr(1), Status: model.StatusFailed, LatencyMs: 50},
+		model.Site{Name: "快B剧", SourceURL: "http://sub2.com/", Type: model.IntPtr(1), IsSpider: true, Status: model.StatusOK, LatencyMs: 120},
+		model.Site{Name: "快A剧", SourceURL: "http://sub2.com/", Type: model.IntPtr(1), IsSpider: true, Status: model.StatusOK, LatencyMs: 120},
+		model.Site{Name: "慢影", SourceURL: "http://sub1.com/", Type: model.IntPtr(1), IsSpider: true, Status: model.StatusOK, LatencyMs: 800},
+		model.Site{Name: "未探测影视", SourceURL: "http://sub3.com/", Type: model.IntPtr(1), IsSpider: true},
+		model.Site{Name: "失败剧集", SourceURL: "http://sub4.com/", Type: model.IntPtr(1), IsSpider: true, Status: model.StatusFailed, LatencyMs: 50},
 	)
 	cfg := b.buildSubscription(sites, nil, 15)
 	if len(cfg.Sites) != 10 {
@@ -122,10 +122,10 @@ func TestBuildSubscriptionCategoryExclusion(t *testing.T) {
 		{Name: "⚽八八┃看球", Type: model.IntPtr(1), Status: model.StatusOK, SourceURL: "http://s1.com/"},  // 体育 → 排除
 		{Name: "📚初中┃课堂", Type: model.IntPtr(1), Status: model.StatusOK, SourceURL: "http://s2.com/"},  // 教育 → 排除
 		{Name: "🎬热播┃影视", Type: model.IntPtr(1), Status: model.StatusOK, SourceURL: "http://s3.com/"},  // 影视 → 保留
-		{Name: "🧲新6V┃磁力", Type: model.IntPtr(1), Status: model.StatusOK, SourceURL: "http://s4.com/"},  // 磁力 → 排除
+		{Name: "🧲新6V┃磁力", Type: model.IntPtr(1), Status: model.StatusOK, SourceURL: "http://s4.com/"}, // 磁力 → 排除
 		{Name: "🐻剧圈┃影视", Type: model.IntPtr(1), Status: model.StatusOK, SourceURL: "http://s5.com/"},  // 影视 → 保留
 		{Name: "🐾日本┃动漫", Type: model.IntPtr(1), Status: model.StatusOK, SourceURL: "http://s6.com/"},  // 动漫 → 保留
-		{Name: "🎵音乐┃MV", Type: model.IntPtr(1), Status: model.StatusOK, SourceURL: "http://s7.com/"},    // 音乐 → 排除
+		{Name: "🎵音乐┃MV", Type: model.IntPtr(1), Status: model.StatusOK, SourceURL: "http://s7.com/"},  // 音乐 → 排除
 		{Name: "📺综艺┃热播", Type: model.IntPtr(1), Status: model.StatusOK, SourceURL: "http://s8.com/"},  // 综艺 → 保留
 		{Name: "🌞光影┃不卡", Type: model.IntPtr(1), Status: model.StatusOK, SourceURL: "http://s9.com/"},  // 通用影视 → 保留
 	}

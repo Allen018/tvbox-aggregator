@@ -51,10 +51,11 @@ func (f *Fetcher) FetchSubscription(ctx context.Context, subURL string, headers 
 	var cfg model.TVBoxConfig
 	if err := json.Unmarshal(body, &cfg); err == nil && len(cfg.Sites) > 0 {
 		for _, s := range cfg.Sites {
-			if s.Spider == "" {
-				s.Spider = global.Spider
+			// TVBox 读取站点级 jar（不是 spider）；未声明 jar 的站点继承订阅全局 spider。
+			if s.Jar == "" {
+				s.Jar = global.Spider
 			}
-			s.Spider = resolveSpiderPath(subURL, s.Spider)
+			s.Jar = resolveSpiderPath(subURL, s.Jar)
 			res.Sites = append(res.Sites, normalizeSiteType(s))
 		}
 		return res, nil
@@ -135,31 +136,32 @@ func normalizeSiteType(s model.Site) model.Site {
 	return s
 }
 
-// resolveSpiderPath 将订阅配置中的相对 spider 路径解析为绝对地址。
-// 形如 "./fty.jar;md5;xxx" 的路径取分号前部分，基于订阅 URL 解析。
+// resolveSpiderPath 将订阅配置中的相对 jar/spider 路径解析为绝对地址。
+// 形如 "./fty.jar;md5;xxx" 的路径：分号前部分参与解析，保留 ";md5;xxx" 后缀供客户端校验。
 func resolveSpiderPath(base, spider string) string {
 	spider = strings.TrimSpace(spider)
 	if spider == "" {
 		return ""
 	}
 	path := spider
+	suffix := ""
 	if i := strings.Index(path, ";"); i >= 0 {
-		path = path[:i]
+		path, suffix = path[:i], path[i:]
 	}
 	path = strings.TrimSpace(path)
 	if path == "" {
 		return ""
 	}
 	if strings.Contains(path, "://") {
-		return path
+		return path + suffix
 	}
 	u, err := url.Parse(base)
 	if err != nil {
-		return path
+		return path + suffix
 	}
 	ref, err := u.Parse(path)
 	if err != nil {
-		return path
+		return path + suffix
 	}
-	return ref.String()
+	return ref.String() + suffix
 }

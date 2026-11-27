@@ -413,9 +413,13 @@ func addExtracted(dst *[]model.SourceConfig, seen map[string]bool, src model.Sou
 	if src.Name == "" || src.URL == "" {
 		return
 	}
-	key := src.Name + "|" + src.URL
+	// 优先以客户端主键 key 去重；缺失时退化为 name+url，爬虫站再附加 jar 区分。
+	key := src.Key + "|" + src.API
+	if src.Key == "" {
+		key = src.Name + "|" + src.URL
+	}
 	if src.Type == "spider" {
-		key = src.API + "|" + src.Spider
+		key += "|" + src.Jar
 	}
 	if seen[key] {
 		return
@@ -427,18 +431,25 @@ func addExtracted(dst *[]model.SourceConfig, seen map[string]bool, src model.Sou
 // toSubscriptionSite 将订阅中解析出的站点转为源池条目。
 // 爬虫站：API 保留原始 spider 名/JS 地址（客户端使用），URL 设为订阅地址（延迟探测目标）；
 // 采集站：API 与 URL 均为采集站 API 地址。
-// OutputType 保留原始类型数值（0/1/3），客户端需要原始 type（如 csp 源为 3）。
+// Key/Jar/Ext/Categories 与 OutputType 一并保留，避免客户端所需字段在合并中丢失。
 func toSubscriptionSite(s model.Site, subURL string) model.SourceConfig {
+	outType := 0
+	if s.Type != nil && s.Type.Set {
+		outType = s.Type.Value
+	}
 	src := model.SourceConfig{
 		Name:       s.Name,
+		Key:        s.Key,
 		URL:        s.API,
 		API:        s.API,
 		Type:       "collect",
-		OutputType: s.Type.Value,
+		OutputType: outType,
+		Jar:        s.Jar,
+		Ext:        s.Ext,
+		Categories: s.Categories,
 	}
 	if s.Type != nil && (s.Type.Value == 1 || s.Type.Value == 3) {
 		src.Type = "spider"
-		src.Spider = s.Spider
 		src.URL = subURL
 	}
 	return src

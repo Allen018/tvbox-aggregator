@@ -105,9 +105,13 @@ func TestFetchSubscriptionSites(t *testing.T) {
 	if res.Sites[0].Type == nil || res.Sites[0].Type.Value != 3 {
 		t.Errorf("type 3 应保留为 3，实际 %+v", res.Sites[0].Type)
 	}
-	// 全局 spider 应用于未声明 spider 的站点，相对路径应解析为绝对地址
-	if res.Sites[0].Spider != srv.URL+"/fty.jar" {
-		t.Errorf("spider 相对路径解析错误: %q", res.Sites[0].Spider)
+	// 上游 key 必须保留，站点级 jar 使用客户端读取的字段
+	if res.Sites[0].Key != "k1" {
+		t.Errorf("上游 key 丢失，实际 %q", res.Sites[0].Key)
+	}
+	// 全局 spider 继承为站点 jar，相对路径解析为绝对地址并保留 md5 后缀
+	if res.Sites[0].Jar != srv.URL+"/fty.jar;md5;abc" {
+		t.Errorf("jar 相对路径解析错误: %q", res.Sites[0].Jar)
 	}
 	// 采集站保持 type 0
 	if res.Sites[1].Type == nil || res.Sites[1].Type.Value != 0 {

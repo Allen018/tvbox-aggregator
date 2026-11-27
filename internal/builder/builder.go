@@ -2,6 +2,7 @@
 package builder
 
 import (
+	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"math"
@@ -105,14 +106,21 @@ func (b *Builder) Build(
 		if existing[e.URL] {
 			continue
 		}
+		outType := e.Type
+		if outType == 0 {
+			outType = 1 // 默认 JSON CMS 采集站
+		}
 		sites = append(sites, model.Site{
-			Name:       joinTags(e.Name, []string{"[国内直连]"}),
-			Type:       model.IntPtr(0),
-			API:        e.URL,
-			Searchable: model.IntPtr(1),
-			SourceURL:  e.URL,
-			Status:     model.StatusOK,
-			Tags:       []string{"[国内直连]"},
+			Key:         stableKey(e.Name, e.URL),
+			Name:        joinTags(e.Name, []string{"[国内直连]"}),
+			Type:        model.IntPtr(outType),
+			API:         e.URL,
+			Searchable:  model.IntPtr(1),
+			QuickSearch: model.IntPtr(1),
+			Changeable:  model.IntPtr(1),
+			SourceURL:   e.URL,
+			Status:      model.StatusOK,
+			Tags:        []string{"[国内直连]"},
 		})
 	}
 
@@ -128,29 +136,39 @@ func (b *Builder) toSite(src model.SourceConfig, res *model.TestResult, whitelis
 	if api == "" {
 		api = src.URL
 	}
-	// 输出类型：订阅提取的源保留原始类型数值（0/1/3），手动源按内部分类（采集 0 / 爬虫 1）
-	outType := 0
+	// 输出类型：默认 JSON CMS(1)，爬虫站默认 3；订阅提取/手工 output_type 优先；XML 接口识别为 0。
+	outType := 1
 	if src.Type == "spider" {
-		outType = 1
+		outType = 3
 	}
 	if src.OutputType > 0 {
 		outType = src.OutputType
 	}
+	if src.Type == "collect" && src.OutputType == 0 && strings.Contains(strings.ToLower(api), "xml") {
+		outType = 0
+	}
+	key := src.Key
+	if key == "" {
+		key = stableKey(src.Name, api)
+	}
 	s := model.Site{
+		Key:         key,
 		Name:        src.Name,
 		Type:        model.IntPtr(outType),
 		API:         api,
 		Searchable:  model.IntPtr(1),
 		QuickSearch: model.IntPtr(1),
+		Filterable:  model.IntPtr(0),
+		Changeable:  model.IntPtr(1),
+		Ext:         src.Ext,
+		Jar:         src.Jar,
+		Categories:  src.Categories,
 		SourceURL:   src.URL,
 	}
-	if src.Type == "spider" {
-		// 类型已在上方按 OutputType 设置（订阅提取的 csp 源为 3），此处不再覆盖
-		s.Spider = src.Spider
-		if res != nil {
-			// 爬虫站延迟探测结果（TTFB），用于订阅内排序
-			s.LatencyMs = res.TTFBMs
-		}
+	s.IsSpider = src.Type == "spider"
+	if s.IsSpider && res != nil {
+		// 爬虫站延迟探测结果（TTFB），用于订阅内排序
+		s.LatencyMs = res.TTFBMs
 	}
 	if src.Category != "" {
 		s.Group = src.Category
@@ -194,6 +212,12 @@ func (b *Builder) toSite(src model.SourceConfig, res *model.TestResult, whitelis
 	return s
 }
 
+// stableKey 为缺少上游 key 的站点生成稳定主键：名称 + API 的 SHA-256 前 4 字节。
+func stableKey(name, api string) string {
+	sum := sha256.Sum256([]byte(name + "|" + api))
+	return fmt.Sprintf("k_%x", sum[:4])
+}
+
 // joinTags 将标签折叠进站点名称（客户端仅展示 name）。
 func joinTags(name string, tags []string) string {
 	if len(tags) == 0 {
@@ -202,23 +226,23 @@ func joinTags(name string, tags []string) string {
 	return name + " " + strings.Join(tags, " ")
 }
 
-// rewriteJar 将外部 spider/jar 地址重写为本地托管地址，防上游失效与篡改。
+// rewriteJar 将站点级 JAR 地址重写为本地托管地址，防上游失效与篡改。
+// 客户端实际读取 jar 字段；站点级 spider 字段不再参与输出。
 func (b *Builder) rewriteJar(s model.Site) model.Site {
-	if b.JarBaseURL == "" {
+	if b.JarBaseURL == "" || s.Jar == "" {
 		return s
 	}
-	if s.Spider != "" {
-		s.Spider = b.localize(s.Spider)
-	}
-	if s.Jar != "" {
-		s.Jar = b.localize(s.Jar)
-	}
+	s.Jar = b.localize(s.Jar)
 	return s
 }
 
-// localize 保留原文件名，替换为本地托管路径。
+// localize 保留原文件名，替换为本地托管路径（忽略 ;md5; 校验后缀）。
 func (b *Builder) localize(original string) string {
-	name := path.Base(original)
+	orig := original
+	if i := strings.Index(orig, ";"); i >= 0 {
+		orig = orig[:i]
+	}
+	name := path.Base(orig)
 	if name == "." || name == "/" || name == "" || name == "jar" {
 		name = "spider.jar"
 	}
@@ -316,8 +340,8 @@ func (b *Builder) buildSubscription(sites []model.Site, probes map[string]*model
 		if isExcludedCategory(s.Name) {
 			continue
 		}
-		// 爬虫站：type 1 或 3（csp 源）均归入爬虫站段
-		if s.Type != nil && (s.Type.Value == 1 || s.Type.Value == 3) {
+		// 爬虫站：用内部标记判断，不能用 type（JSON CMS 也是 type 1）
+		if s.IsSpider {
 			spider = append(spider, s)
 			continue
 		}
@@ -350,10 +374,47 @@ func (b *Builder) buildSubscription(sites []model.Site, probes map[string]*model
 	kept = append(kept, wl...)
 	kept = append(kept, ranked...)
 	kept = append(kept, spider...)
+	// key 是 TVBox 主键，必须唯一；上游不同订阅可能携带相同 key，保留首次出现者。
+	seenKeys := make(map[string]bool, len(kept))
+	unique := make([]model.Site, 0, len(kept))
+	for _, s := range kept {
+		if s.Key == "" {
+			s.Key = stableKey(s.Name, s.API)
+		}
+		if seenKeys[s.Key] {
+			continue
+		}
+		seenKeys[s.Key] = true
+		unique = append(unique, s)
+	}
+	kept = unique
 	if len(kept) > topN {
 		kept = kept[:topN] // 极端情况（白名单+爬虫站超限）兜底截取
 	}
-	return &model.TVBoxConfig{Sites: kept}
+	return &model.TVBoxConfig{
+		Spider: pickGlobalSpider(spider),
+		Sites:  kept,
+		Lives:  []json.RawMessage{},
+		Parses: []json.RawMessage{},
+	}
+}
+
+// pickGlobalSpider 选取出现次数最多的 JAR 作为全局 spider（与原项目策略一致）。
+// 站点自带 jar 时优先生效；未声明 jar 的 csp 站点使用此处选出的全局 JAR。
+func pickGlobalSpider(sites []model.Site) string {
+	counts := make(map[string]int, len(sites))
+	for _, s := range sites {
+		if s.Type != nil && s.Type.Value == 3 && s.Jar != "" {
+			counts[s.Jar]++
+		}
+	}
+	best, bestN := "", 0
+	for jar, n := range counts {
+		if n > bestN || (n == bestN && jar < best) {
+			best, bestN = jar, n
+		}
+	}
+	return best
 }
 
 // ---------------------------------------------------------------------------
