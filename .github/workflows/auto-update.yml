@@ -2,22 +2,23 @@ name: tvbox-aggregator
 
 on:
   schedule:
-    # 每日一次（UTC 0 点，对应北京时间早 8 点）；兼顾时效与 Actions 用量
+    # 每日一次（UTC 0 点，北京时间早 8 点）
     - cron: '0 0 * * *'
   workflow_dispatch:
 
-# 同一工作流禁止重叠运行，避免上一轮未结束时下一轮又启动
+# 同一工作流禁止重叠运行，避免两个任务同时强推 dist 分支
 concurrency:
   group: tvbox-aggregator-dist
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 permissions:
   contents: write
 
 jobs:
   aggregate:
-    name: 聚合测速与分发
+    name: 聚合测速与发布
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - name: 检出代码
         uses: actions/checkout@v4
@@ -25,34 +26,45 @@ jobs:
       - name: 设置 Go
         uses: actions/setup-go@v5
         with:
-          go-version: '1.22'
+          go-version-file: go.mod
           cache: true
+
+      - name: 恢复上轮发现源池
+        run: |
+          git fetch origin dist --quiet || true
+          git show origin/dist:dist/discovered.yaml > config/discovered.yaml 2>/dev/null || true
 
       - name: 构建
         run: go build -trimpath -ldflags="-s -w" -o tvbox-aggregator .
 
       - name: 运行聚合测速与自动发现
         env:
-          # GitHub 代码搜索通道认证（官方 Search API，Actions 内置 token 即可）
           GITHUB_TOKEN: ${{ github.token }}
-          # 本地托管 jar 的 CF 基础地址，未配置则不重写 spider/jar（可在仓库 Settings -> Variables 配置）
           TVBOX_JAR_BASE_URL: ${{ vars.TVBOX_JAR_BASE_URL }}
         run: ./tvbox-aggregator
 
-      - name: 提交产物
+      # 产物只发布到独立的 dist 分支，不碰 main。
+      # main 永远只包含代码，本地与远端不会再分叉。
+      - name: 发布快照到 dist 分支
         run: |
+          set -euo pipefail
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add dist/ config/discovered.yaml
-          if git diff --cached --quiet; then
-            echo "产物无变化，跳过提交"
-          else
-            if git rev-parse --verify HEAD >/dev/null 2>&1; then
-              # 仅保留最新一次快照，仓库体积永久保持在几 MB 以内
-              git commit --amend --no-edit --date="$(date -u +'%Y-%m-%dT%H:%M:%SZ')"
-              git push --force-with-lease origin HEAD
-            else
-              git commit -m "chore: 初始化聚合产物"
-              git push origin HEAD
-            fi
-          fi
+
+          SNAPSHOT="$(mktemp -d)"
+          git worktree add --detach "$SNAPSHOT" >/dev/null
+          cd "$SNAPSHOT"
+
+          # 用孤儿分支做单快照提交，dist 分支永远只有一次提交
+          git checkout --orphan site
+          git rm -rf . >/dev/null 2>&1 || true
+
+          mkdir -p dist
+          cp -r "$GITHUB_WORKSPACE/dist/." dist/
+          cp "$GITHUB_WORKSPACE/config/discovered.yaml" dist/discovered.yaml
+
+          git add -A
+          git commit -m "dist snapshot: $(date -u '+%Y-%m-%dT%H:%M:%SZ')" --allow-empty
+          git push --force origin HEAD:dist
+
+          echo "已发布 dist 分支快照"

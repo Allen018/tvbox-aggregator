@@ -17,7 +17,8 @@
 ```text
 tvbox-aggregator/
 ├── .github/workflows/
-│   └── auto-update.yml        # 每日定时调度、Go 缓存、产物自动提交
+│   ├── auto-update.yml        # 每日定时调度，产物发布到独立 dist 分支
+│   └── keepalive.yml          # 每月一次心跳提交，防止 schedule 被禁用
 ├── config/
 │   ├── sources.yaml           # 人工维护源池（采集站 API + 爬虫站）
 │   ├── whitelist.yaml         # 国内专属保底源白名单
@@ -61,6 +62,8 @@ go build -o tvbox-aggregator .
 GitHub 代码搜索通道需要认证：本地运行前设置环境变量 `GITHUB_TOKEN`（未设置时该通道自动跳过，不影响其余流程）。
 
 ## 订阅直链
+
+> **产物发布机制**：`main` 分支只放代码；GitHub Actions 每天把生成的 `dist/` 以单快照提交发布到独立的 **`dist` 分支**。Cloudflare Pages 的生产分支应设为 `dist`，输出目录 `/`。这样本地 `main` 与远端永远不会因产物更新而分叉，上传代码不需要 rebase 或 force push。
 
 部署到 Cloudflare Pages 并绑定自定义域名后（见下文），将以下地址复制到 TVBox / 影视仓 / FongMi 客户端的「订阅地址」：
 

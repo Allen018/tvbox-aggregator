@@ -1,3 +1,8 @@
-# 构建产物
+# 构建产物（由 GitHub Actions 发布到独立的 dist 分支，不提交到 main）
+/dist/
+/config/discovered.yaml
 /tvbox-aggregator
 /tvbox-aggregator.exe
+
+# 本地诊断报告（按需保留，可取消注释）
+# /DIAGNOSIS-no-lines.md

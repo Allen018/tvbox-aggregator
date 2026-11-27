@@ -71,17 +71,17 @@ git push -u origin main
 3. 观察日志各步骤：
    - ✅ 检出代码、设置 Go（依赖缓存）、构建成功
    - ✅ 运行聚合测速：输出加载源池、测速统计、发现通道日志
-   - ✅ 提交产物：显示提交成功（首次运行自动创建初始提交；后续运行使用 `commit --amend` 仅保留最新快照）
+   - ✅ 发布快照到 dist 分支：显示 `已发布 dist 分支快照`，`main` 分支不会被修改
 
 ### 1.6 验证提交结果
 
-仓库文件列表应出现：
+切换到 **`dist` 分支**后，仓库根目录应出现：
 
-- `dist/tvbox.json`（单一订阅版，15 条源）
+- `dist/tvbox.json`（单一订阅版，50 条源）
 - `dist/status.json`（诊断文件）
-- `config/discovered.yaml`（发现源池）
+- `dist/discovered.yaml`（发现源池，供下一轮复用）
 
-> 注意：当前 `config/sources.yaml` 中为示例源池，域名已失效，首轮 `tvbox.json` 可能为空或仅含保底源——补充真实采集站后次轮即正常填充。
+`main` 分支只包含代码，不再包含这些生成文件。本地开发时 `dist/` 与 `config/discovered.yaml` 已被 `.gitignore` 忽略。
 
 ### 1.7 调度说明
 
@@ -105,7 +105,7 @@ git push -u origin main
 
 - **构建命令**：留空（纯静态仓库，无需构建）
 - **输出目录**：`/`（根目录）
-- **生产分支**：`main`
+- **生产分支**：`dist`（不是 `main`；产物由 Actions 发布到该分支）
 
 点击 **Deploy**，等待首次部署完成。
 
@@ -161,7 +161,7 @@ git push -u origin main
 
 | 问题 | 排查方向 |
 | :--- | :--- |
-| 工作流"提交产物"失败 | 检查 Actions 写权限是否开启（Settings → Actions → General） |
+| "发布快照到 dist 分支"失败 | 检查 Actions 写权限（Settings → Actions → General → Read and write permissions）及 `dist` 分支是否存在 |
 | 工作流构建失败 | 检查 Go 版本与网络（依赖缓存是否命中）；重跑一次 |
 | 发现通道未产出源 | 本地无 `GITHUB_TOKEN` 时 GitHub 通道自动跳过（CI 中自动注入，无需配置）；索引站通道检查 `discover.yaml` 的 `index_sites` |
 | 产物未更新 | 查看提交步骤日志：产物无变化时会跳过提交（属正常）；有变化但未提交则检查权限 |
