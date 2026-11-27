@@ -1,7 +1,14 @@
 package fetcher
 
 import (
+	"context"
+	"encoding/json"
+	"io"
+	"net/http"
+	"net/http/httptest"
 	"testing"
+	"time"
+	"unicode/utf8"
 
 	"tvbox-aggregator/internal/model"
 )
@@ -70,5 +77,135 @@ func TestExtractPlayURLsSkipTrailer(t *testing.T) {
 	urls := ExtractPlayURLs(vl, 5)
 	if len(urls) != 1 || urls[0] != "https://a.com/1.m3u8" {
 		t.Errorf("预告片应被跳过，实际 %v", urls)
+	}
+}
+
+func TestFetchSubscriptionSites(t *testing.T) {
+	// 模拟订阅配置：含全局 spider、type 3 爬虫源、type 0 采集站
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		io.WriteString(w, `{
+			"spider": "./fty.jar;md5;abc",
+			"sites": [
+				{"key": "k1", "name": "爬虫站点", "type": 3, "api": "csp_DouDouGuard"},
+				{"key": "k2", "name": "采集站点", "type": 0, "api": "http://a.com/api.php/provide/vod"}
+			]
+		}`)
+	}))
+	defer srv.Close()
+
+	f := New(10 * time.Second)
+	res, err := f.FetchSubscription(context.Background(), srv.URL, nil)
+	if err != nil {
+		t.Fatalf("FetchSubscription 报错: %v", err)
+	}
+	if len(res.Sites) != 2 {
+		t.Fatalf("期望 2 个站点，实际 %d", len(res.Sites))
+	}
+	// type 3 应映射为爬虫站（1）
+	if res.Sites[0].Type == nil || res.Sites[0].Type.Value != 1 {
+		t.Errorf("type 3 应映射为 1，实际 %+v", res.Sites[0].Type)
+	}
+	// 全局 spider 应用于未声明 spider 的站点，相对路径应解析为绝对地址
+	if res.Sites[0].Spider != srv.URL+"/fty.jar" {
+		t.Errorf("spider 相对路径解析错误: %q", res.Sites[0].Spider)
+	}
+	// 采集站保持 type 0
+	if res.Sites[1].Type == nil || res.Sites[1].Type.Value != 0 {
+		t.Errorf("采集站 type 应为 0，实际 %+v", res.Sites[1].Type)
+	}
+	if res.Sites[1].API != "http://a.com/api.php/provide/vod" {
+		t.Errorf("采集站 api 解析错误: %q", res.Sites[1].API)
+	}
+}
+
+func TestFetchSubscriptionURLs(t *testing.T) {
+	// 模拟地址列表格式
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		io.WriteString(w, `{"urls":[{"name":"子订阅一","url":"http://a.com/sub1.json"},{"name":"子订阅二","url":"http://b.com/sub2.json"}]}`)
+	}))
+	defer srv.Close()
+
+	f := New(10 * time.Second)
+	res, err := f.FetchSubscription(context.Background(), srv.URL, nil)
+	if err != nil {
+		t.Fatalf("FetchSubscription 报错: %v", err)
+	}
+	if len(res.URLs) != 2 || res.URLs[0] != "http://a.com/sub1.json" || res.URLs[1] != "http://b.com/sub2.json" {
+		t.Errorf("子订阅地址提取错误: %v", res.URLs)
+	}
+}
+
+func TestFetchSubscriptionInvalid(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		io.WriteString(w, `{"foo":"bar"}`)
+	}))
+	defer srv.Close()
+
+	f := New(10 * time.Second)
+	if _, err := f.FetchSubscription(context.Background(), srv.URL, nil); err == nil {
+		t.Error("无法识别的格式应报错")
+	}
+}
+
+func TestTranscodeBodyGBK(t *testing.T) {
+	// GBK 编码的中文 JSON："测试" 的 GBK 字节为 B2 E2 CA D4
+	gbkJSON := []byte{
+		0x7B, 0x22, 0x6E, 0x61, 0x6D, 0x65, 0x22, 0x3A, 0x22,
+		0xB2, 0xE2, 0xCA, 0xD4,
+		0x22, 0x7D,
+	}
+	if utf8.Valid(gbkJSON) {
+		t.Fatal("测试数据应为非 UTF-8")
+	}
+	got := transcodeBody(gbkJSON)
+	if !utf8.Valid(got) {
+		t.Fatal("转码后应为合法 UTF-8")
+	}
+	var m map[string]string
+	if err := json.Unmarshal(got, &m); err != nil {
+		t.Fatalf("转码后解析失败: %v", err)
+	}
+	if m["name"] != "测试" {
+		t.Errorf("转码内容错误: %q", m["name"])
+	}
+}
+
+func TestTranscodeBodyUTF8Passthrough(t *testing.T) {
+	utf8Body := []byte(`{"name":"测试"}`)
+	if !utf8.Valid(utf8Body) {
+		t.Fatal("测试数据应为合法 UTF-8")
+	}
+	got := transcodeBody(utf8Body)
+	if string(got) != string(utf8Body) {
+		t.Error("UTF-8 内容应原样透传")
+	}
+}
+
+func TestStripJSONComments(t *testing.T) {
+	// 顶部带说明注释的 JSON（订阅配置常见格式）
+	body := []byte("//以下部分来自网络收集，仅供学习交流使用\n" +
+		`{
+	  "sites": [{"name":"站点","type":0,"api":"http://a.com/api"}]
+	}`)
+	got := stripJSONComments(body)
+	var cfg model.TVBoxConfig
+	if err := json.Unmarshal(got, &cfg); err != nil {
+		t.Fatalf("去注释后解析失败: %v", err)
+	}
+	if len(cfg.Sites) != 1 || cfg.Sites[0].Name != "站点" {
+		t.Errorf("去注释后解析结果错误: %+v", cfg.Sites)
+	}
+}
+
+func TestStripJSONCommentsKeepsInString(t *testing.T) {
+	// 字符串值内的 // 不应被去除
+	body := []byte(`{"url":"http://a.com//path","name":"x"}`)
+	got := stripJSONComments(body)
+	var m map[string]string
+	if err := json.Unmarshal(got, &m); err != nil {
+		t.Fatalf("解析失败: %v", err)
+	}
+	if m["url"] != "http://a.com//path" {
+		t.Errorf("字符串内的 // 被误删: %q", m["url"])
 	}
 }

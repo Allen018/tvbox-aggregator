@@ -106,10 +106,21 @@ func run(sourcesPath, whitelistPath, discoverPath, discoveredOut, outDir, jarBas
 		discovered = prevDiscovered
 	}
 
-	// 合并源池：人工源在前，发现源补充在后
-	allSources := append(sources, discovered...)
-	log.Printf("加载源池 %d 个（人工采集站 %d / 爬虫站 %d，发现源 %d），白名单 %d 个",
-		len(allSources), countCollect(sources), countSpider(sources), len(discovered), len(whitelist))
+	// ---- 订阅式源处理：抓取配置 → 提取站点 → 合并入池 ----
+	extractedSources, subProbes := processSubscriptions(ctx, f, sources)
+
+	// 过滤订阅式源（组本身不输出，仅用于提取站点）
+	var poolSources []model.SourceConfig
+	for _, src := range sources {
+		if src.Type != "subscription" {
+			poolSources = append(poolSources, src)
+		}
+	}
+
+	// 合并源池：人工源 + 订阅提取站点 + 发现源
+	allSources := append(append(poolSources, extractedSources...), discovered...)
+	log.Printf("加载源池 %d 个（人工采集站 %d / 爬虫站 %d，订阅提取 %d，发现源 %d），白名单 %d 个",
+		len(allSources), countCollect(poolSources), countSpider(poolSources), len(extractedSources), len(discovered), len(whitelist))
 
 	// 白名单 URL 集合：命中白名单的采集站不做全量测速，改为存活探测
 	wlURLs := make(map[string]model.WhitelistEntry, len(whitelist))
@@ -182,7 +193,7 @@ func run(sourcesPath, whitelistPath, discoverPath, discoveredOut, outDir, jarBas
 		discoveredSet[s.URL] = true
 	}
 	b := builder.New(jarBaseURL, outDir)
-	if err := b.Build(allSources, results, whitelist, probes, discoveredSet, topN); err != nil {
+	if err := b.Build(allSources, results, whitelist, probes, discoveredSet, topN, subProbes); err != nil {
 		return err
 	}
 
@@ -271,6 +282,10 @@ func probeSpiderLatency(ctx context.Context, f *fetcher.Fetcher, spiders []model
 			start := time.Now()
 			body, status, err := f.FetchRaw(pctx, src.URL, src.Headers)
 			res.TTFBMs = int64(time.Since(start).Milliseconds())
+			if res.TTFBMs <= 0 {
+				// 时钟精度兜底：本地回环响应可能低于时钟粒度，记 1ms
+				res.TTFBMs = 1
+			}
 			switch {
 			case err != nil:
 				res.Error = err.Error() // 网络层失败：源大概率已失效
@@ -287,6 +302,144 @@ func probeSpiderLatency(ctx context.Context, f *fetcher.Fetcher, spiders []model
 	}
 	wg.Wait()
 	return probes
+}
+
+// processSubscriptions 处理全部订阅式源：并发抓取配置、提取站点、一层展开子订阅地址。
+// 返回合并去重后的站点列表与各订阅的诊断结果。订阅式源本身不输出，仅作为站点提取入口。
+func processSubscriptions(ctx context.Context, f *fetcher.Fetcher, sources []model.SourceConfig) ([]model.SourceConfig, map[string]*model.SubscriptionProbe) {
+	var subSources []model.SourceConfig
+	for _, src := range sources {
+		if src.Type == "subscription" {
+			subSources = append(subSources, src)
+		}
+	}
+	if len(subSources) == 0 {
+		return nil, map[string]*model.SubscriptionProbe{}
+	}
+
+	type subResult struct {
+		src   model.SourceConfig
+		sites []model.SourceConfig
+		urls  []string
+		probe *model.SubscriptionProbe
+	}
+
+	var wg sync.WaitGroup
+	sem := make(chan struct{}, 10)
+	resCh := make(chan subResult, len(subSources))
+	for _, src := range subSources {
+		wg.Add(1)
+		sem <- struct{}{}
+		go func(src model.SourceConfig) {
+			defer wg.Done()
+			defer func() { <-sem }()
+			sites, urls, probe := processSubscription(ctx, f, src)
+			resCh <- subResult{src: src, sites: sites, urls: urls, probe: probe}
+		}(src)
+	}
+	wg.Wait()
+	close(resCh)
+
+	extracted := make([]model.SourceConfig, 0, 64)
+	seen := map[string]bool{}
+	subProbes := map[string]*model.SubscriptionProbe{}
+	var childURLs []string
+	for r := range resCh {
+		subProbes[r.src.URL] = r.probe
+		for _, s := range r.sites {
+			addExtracted(&extracted, seen, s)
+		}
+		childURLs = append(childURLs, r.urls...)
+	}
+
+	// 一层展开子订阅地址（限量，防失控）
+	extracted = append(extracted, expandSubscriptionURLs(ctx, f, childURLs, seen)...)
+	return extracted, subProbes
+}
+
+// processSubscription 抓取单个订阅式源配置，提取站点与子订阅地址。
+func processSubscription(ctx context.Context, f *fetcher.Fetcher, src model.SourceConfig) ([]model.SourceConfig, []string, *model.SubscriptionProbe) {
+	probe := &model.SubscriptionProbe{
+		Name: src.Name, URL: src.URL, Status: model.StatusFailed, CheckedAt: time.Now().UTC(),
+	}
+	start := time.Now()
+	res, err := f.FetchSubscription(ctx, src.URL, src.Headers)
+	probe.TTFBMs = int64(time.Since(start).Milliseconds())
+	if err != nil {
+		probe.Error = err.Error()
+		return nil, nil, probe
+	}
+	probe.Status = model.StatusOK
+	probe.Sites = len(res.Sites)
+	probe.URLs = len(res.URLs)
+
+	sites := make([]model.SourceConfig, 0, len(res.Sites))
+	for _, s := range res.Sites {
+		sites = append(sites, toSubscriptionSite(s, src.URL))
+	}
+	return sites, res.URLs, probe
+}
+
+// expandSubscriptionURLs 一层展开订阅地址列表中的子订阅地址，提取站点（限量 20 个）。
+func expandSubscriptionURLs(ctx context.Context, f *fetcher.Fetcher, urls []string, seen map[string]bool) []model.SourceConfig {
+	unique := map[string]bool{}
+	for _, u := range urls {
+		if u != "" {
+			unique[u] = true
+		}
+	}
+	out := make([]model.SourceConfig, 0, 32)
+	count := 0
+	for u := range unique {
+		if count >= 20 {
+			break
+		}
+		count++
+		res, err := f.FetchSubscription(ctx, u, nil)
+		if err != nil {
+			continue
+		}
+		for _, s := range res.Sites {
+			addExtracted(&out, seen, toSubscriptionSite(s, u))
+		}
+	}
+	return out
+}
+
+// addExtracted 将订阅提取的站点加入列表并去重：
+// 采集站按名称+地址去重；爬虫站按 api+spider 去重（相同配置的站点视为同一源，
+// 避免同一订阅的冗余站点挤占名额、降低多样性）。
+func addExtracted(dst *[]model.SourceConfig, seen map[string]bool, src model.SourceConfig) {
+	if src.Name == "" || src.URL == "" {
+		return
+	}
+	key := src.Name + "|" + src.URL
+	if src.Type == "spider" {
+		key = src.API + "|" + src.Spider
+	}
+	if seen[key] {
+		return
+	}
+	seen[key] = true
+	*dst = append(*dst, src)
+}
+
+// toSubscriptionSite 将订阅中解析出的站点转为源池条目。
+// 爬虫站：API 保留原始 spider 名/JS 地址（客户端使用），URL 设为订阅地址（延迟探测目标）；
+// 采集站：API 与 URL 均为采集站 API 地址。
+func toSubscriptionSite(s model.Site, subURL string) model.SourceConfig {
+	src := model.SourceConfig{
+		Name: s.Name,
+		URL:  s.API,
+		API:  s.API,
+		Type: "collect",
+	}
+	if s.Type != nil && s.Type.Value == 1 {
+		src.Type = "spider"
+		src.Spider = s.Spider
+		src.URL = subURL
+	}
+	return src
 }
 
 // probeWhitelist 对白名单源做低成本存活探测（GET 首页/API）。

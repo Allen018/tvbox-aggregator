@@ -296,11 +296,13 @@ type TestResult struct {
 type SourceConfig struct {
 	Name     string            `yaml:"name"`
 	URL      string            `yaml:"url"`
-	Type     string            `yaml:"type"`    // collect=采集站（可测速）spider=爬虫站（免测）
-	Category string            `yaml:"category"` // 分组标注（多仓版）
+	API      string            `yaml:"api"` // 站点 api 地址（采集站 API / 爬虫站 spider 名或 JS 地址）；缺省用 URL
+	Type     string            `yaml:"type"` // collect=采集站（可测速）spider=爬虫站（免测）subscription=订阅式源（抓取配置提取站点）
+	Category string            `yaml:"category"` // 分组标注（预留）
 	Spider   string            `yaml:"spider"`   // 爬虫站 spider jar 原始地址（可被本地化重写）
 	Headers  map[string]string `yaml:"headers"`  // 按源自定义请求头（反爬校验）
-	Skip     bool              `yaml:"skip"`     // 跳过测速（仍输出配置）
+	Skip     bool              `yaml:"skip"`     // 跳过测速（仍参与配置输出）
+	LocalJar bool              `yaml:"local_jar"` // 爬虫站 spider 地址是否重写为本地托管（需 jar 已放入仓库 jar/ 目录）
 }
 
 // WhitelistEntry 国内保底源白名单项（config/whitelist.yaml）。
@@ -318,6 +320,18 @@ type WhitelistProbe struct {
 	URL       string    `json:"url"`
 	Alive     bool      `json:"alive"`
 	Status    int       `json:"status"`
+	Error     string    `json:"error,omitempty"`
+	CheckedAt time.Time `json:"checked_at"`
+}
+
+// SubscriptionProbe 订阅式源抓取诊断结果。
+type SubscriptionProbe struct {
+	Name      string    `json:"name"`
+	URL       string    `json:"url"`
+	Status    string    `json:"status"` // ok=抓取成功 failed=失败
+	TTFBMs    int64     `json:"ttfb_ms"`
+	Sites     int       `json:"sites"`  // 提取到的站点数
+	URLs      int       `json:"urls"`   // 展开的子订阅地址数
 	Error     string    `json:"error,omitempty"`
 	CheckedAt time.Time `json:"checked_at"`
 }

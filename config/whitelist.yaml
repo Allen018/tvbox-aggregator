@@ -1,24 +1,10 @@
 # 国内专属保底源白名单
 #
-# GitHub Actions 位于海外机房，部分优质国内采集站会对海外 IP 返回
-# 403/503，导致测速失败被误杀。命中白名单的源：
-#   - 免测速（不做 m3u8 测速与排序）；
-#   - 仅做低成本存活探测（GET 首页/API）；
-#   - 自动标注 [国内直连] 并置顶于 tvbox_full.json 与 tvbox_multi.json 前列。
+# 命中白名单的源免测速，仅做存活探测，自动标注 [国内直连] 并置顶于订阅前列。
+# 海外返回 403/503 属预期内（国内可直连），不计为失效；网络层失败才计为疑似失效。
 #
-# 探测口径：海外返回 403/503 属预期内（国内可直连），不计为失效；
-# 网络层超时/解析失败才计为疑似失效，请结合 status.json 定期复核。
+# 说明：白名单面向**单个源**（采集站 API 或订阅提取出的站点地址），
+# 不适用于订阅式源（订阅是站点组，其内部站点通过订阅抓取自动入池）。
+# 当前订阅式源已覆盖主流生态，白名单可留空，发现优质单源后按需添加。
 
-whitelist:
-  - name: "索尼资源"
-    url: "http://api.wujinren.cn/motif/api.php/provide/vod"
-    note: "国内三网直连优质采集站"
-
-  - name: "小米"
-    url: "http://xiaomi.on/motif/api.php/provide/vod"
-    note: "国内直连保底源"
-
-  # 以下为示例，请按实际国内优质源维护：
-  # - name: "示例国内源"
-  #   url: "http://example-domestic.cn/motif/api.php/provide/vod"
-  #   note: "国内直连保底"
+whitelist: []
