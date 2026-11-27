@@ -18,6 +18,12 @@ discover:
       - "api.php/provide/vod"
     per_page: 100
 
-  # 通道二：社区聚合索引站（页面中提取采集站链接，按需维护）
+  # 通道二：社区聚合页 tvbox.clbug.com/user.php（提取 data-url 订阅地址）
+  clbug:
+    enabled: true
+    url: "https://tvbox.clbug.com/user.php"
+    max_candidates: 120 # 页面当前约 105 条，留余量
+
+  # 通道三：社区聚合索引站（通用链接提取，兜底）
   index_sites:
-    - url: "https://tvbox.clbug.com"
+    - url: "https://tvbox.clbug.com/user.php"

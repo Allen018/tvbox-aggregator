@@ -225,7 +225,7 @@ func TestRunDualChannel(t *testing.T) {
 		"http://existing.example/motif/api.php/provide/vod": true,
 	}
 	prev := []model.SourceConfig{
-		{Name: "上轮有效源", URL: validURL},                       // 复验应保留
+		{Name: "上轮有效源", URL: validURL},                                       // 复验应保留
 		{Name: "上轮失效源", URL: "http://127.0.0.1:1/motif/api.php/provide/vod"}, // 复验应淘汰
 	}
 
@@ -241,6 +241,28 @@ func TestRunDualChannel(t *testing.T) {
 	}
 	if out[0].Name != "发现·"+host {
 		t.Errorf("发现源名称错误: %q", out[0].Name)
+	}
+}
+
+func TestClbugChannel(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		io.WriteString(w, `<html>
+			<a data-url="http://a.com/sub.json">A</a>
+			<a data-url="http://b.com/x.json">B</a>
+			<a data-url="http://a.com/sub.json">dup</a>
+			<a data-url="#comment">C</a>
+		</html>`)
+	}))
+	defer srv.Close()
+
+	cfg := Config{Clbug: ClbugConfig{Enabled: true, URL: srv.URL, MaxCandidates: 10}}
+	d := New(cfg, fetcher.New(10*time.Second), "")
+	got, err := d.clbugChannel(context.Background())
+	if err != nil {
+		t.Fatalf("clbugChannel 报错: %v", err)
+	}
+	if len(got) != 2 || got[0] != "http://a.com/sub.json" || got[1] != "http://b.com/x.json" {
+		t.Errorf("data-url 提取错误: %v", got)
 	}
 }
 

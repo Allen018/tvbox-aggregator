@@ -10,8 +10,10 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"html"
 	"log"
 	"os"
+	"regexp"
 	"strings"
 	"sync"
 	"time"
@@ -32,22 +34,34 @@ const validateConcurrency = 20
 type Config struct {
 	Enabled    bool         `yaml:"enabled"`
 	GitHub     GitHubConfig `yaml:"github"`
+	Clbug      ClbugConfig  `yaml:"clbug"`
 	IndexSites []IndexSite  `yaml:"index_sites"`
 	MaxSources int          `yaml:"max_sources"` // 每轮最多收录数量，控制测速耗时
 }
 
 // GitHubConfig GitHub 代码搜索通道配置。
 type GitHubConfig struct {
-	Enabled  bool     `yaml:"enabled"`
-	Queries  []string `yaml:"queries"`  // 搜索关键词，逐条执行
-	PerPage  int      `yaml:"per_page"` // 单次搜索返回条数
-	BaseURL  string   `yaml:"base_url"` // 默认 https://api.github.com，测试可替换
+	Enabled bool     `yaml:"enabled"`
+	Queries []string `yaml:"queries"`  // 搜索关键词，逐条执行
+	PerPage int      `yaml:"per_page"` // 单次搜索返回条数
+	BaseURL string   `yaml:"base_url"` // 默认 https://api.github.com，测试可替换
 }
 
 // IndexSite 社区聚合索引站配置。
 type IndexSite struct {
 	URL string `yaml:"url"`
 }
+
+// ClbugConfig 社区聚合页发现通道（tvbox.clbug.com/user.php）。
+// 该页只提供“订阅地址列表”，真正的配置来自页面中的每个第三方 URL。
+type ClbugConfig struct {
+	Enabled       bool   `yaml:"enabled"`
+	URL           string `yaml:"url"`
+	MaxCandidates int    `yaml:"max_candidates"`
+}
+
+// clbugURLRegex 提取页面中 data-url="..." 属性。
+var clbugURLRegex = regexp.MustCompile(`data-url="([^"]+)"`)
 
 // Discoverer 采集站发现器。
 type Discoverer struct {
@@ -81,7 +95,16 @@ func (d *Discoverer) Run(ctx context.Context, existing map[string]bool, prev []m
 		candidates = append(candidates, found...)
 	}
 
-	// 通道二：社区聚合索引站
+	// 通道二：社区聚合页 tvbox.clbug.com/user.php（提取 data-url 订阅地址）
+	if d.cfg.Clbug.Enabled {
+		found, err := d.clbugChannel(ctx)
+		if err != nil {
+			log.Printf("clbug 发现通道失败（跳过）: %v", err)
+		}
+		candidates = append(candidates, found...)
+	}
+
+	// 通道三：社区聚合索引站（通用链接提取，兜底）
 	for _, site := range d.cfg.IndexSites {
 		found, err := d.indexChannel(ctx, site.URL)
 		if err != nil {
@@ -160,9 +183,19 @@ func (d *Discoverer) validateAll(ctx context.Context, candidates []string) []*mo
 	return out
 }
 
-// validate 验证候选是否为可用采集站：
-// 探测标准 API 端点，要求 HTTP 200 + 合法 JSON + 有视频列表，全部满足才收录。
+// validate 验证候选：
+//   - 若候选本身是 TVBox 订阅配置（sites / urls），作为 subscription 收录；
+//   - 否则按采集站 API 探测标准端点（HTTP 200 + 合法 JSON + 有视频列表）。
 func (d *Discoverer) validate(ctx context.Context, candidate string) *model.SourceConfig {
+	// 订阅配置优先：clbug 页面给出的都是订阅地址，不能按采集 API 探测。
+	if res, err := d.fetcher.FetchSubscription(ctx, candidate, nil); err == nil &&
+		(len(res.Sites) > 0 || len(res.URLs) > 0) {
+		return &model.SourceConfig{
+			Name: siteName(candidate),
+			URL:  candidate,
+			Type: "subscription",
+		}
+	}
 	for _, u := range candidateURLs(candidate) {
 		body, status, err := d.fetcher.FetchRaw(ctx, u, nil)
 		if err != nil || status != 200 {
@@ -179,6 +212,44 @@ func (d *Discoverer) validate(ctx context.Context, candidate string) *model.Sour
 		}
 	}
 	return nil
+}
+
+// clbugChannel 抓取社区聚合页并提取 data-url 订阅地址。
+// 这里只发现“订阅地址”，不做信任：后续统一经 validate 验证配置可解析后才入池。
+func (d *Discoverer) clbugChannel(ctx context.Context) ([]string, error) {
+	u := d.cfg.Clbug.URL
+	if u == "" {
+		u = "https://tvbox.clbug.com/user.php"
+	}
+	body, status, err := d.fetcher.FetchRaw(ctx, u, nil)
+	if err != nil {
+		return nil, err
+	}
+	if status != 200 {
+		return nil, fmt.Errorf("HTTP %d", status)
+	}
+	matches := clbugURLRegex.FindAllStringSubmatch(string(body), -1)
+	limit := d.cfg.Clbug.MaxCandidates
+	if limit <= 0 {
+		limit = 120
+	}
+	seen := map[string]bool{}
+	out := make([]string, 0, len(matches))
+	for _, m := range matches {
+		if len(m) < 2 {
+			continue
+		}
+		candidate := strings.TrimSpace(html.UnescapeString(m[1]))
+		if candidate == "" || strings.HasPrefix(candidate, "#") || seen[candidate] {
+			continue
+		}
+		seen[candidate] = true
+		out = append(out, candidate)
+		if len(out) >= limit {
+			break
+		}
+	}
+	return out, nil
 }
 
 // LoadConfig 加载发现配置；文件不存在时返回禁用配置（不影响主流程）。
