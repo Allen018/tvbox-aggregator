@@ -1,0 +1,23 @@
+# 采集站自动发现配置（一期双通道）
+#
+# 合规边界：仅探测公开 HTTP 端点（标准采集 API 路径），
+# 不突破反爬、不绕过 robots、不访问需认证内容；全局限速、低频率运行。
+# 发现源经验证通过（200 + 合法 JSON + 有视频列表）后进入候选池，
+# 与人工源池合并测速，产物中标注 [新发现]。
+
+discover:
+  enabled: true
+  max_sources: 60 # 每轮最多收录的发现源数量，控制测速耗时
+
+  # 通道一：GitHub 代码搜索（官方 Search API，需 GITHUB_TOKEN）
+  # 搜索公开仓库中包含采集 API 地址的 TVBox 配置文件，提取其中链接
+  github:
+    enabled: true
+    queries:
+      - "motif/api.php/provide/vod"
+      - "api.php/provide/vod"
+    per_page: 100
+
+  # 通道二：社区聚合索引站（页面中提取采集站链接，按需维护）
+  index_sites:
+    - url: "https://tvbox.clbug.com"

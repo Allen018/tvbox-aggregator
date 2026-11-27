@@ -1,0 +1,390 @@
+# 自动生成的发现源池：由 discover 模块产出，请勿手改。
+# 每轮运行自动刷新；仅验证通过（HTTP 200 + 合法 JSON + 有视频列表）的采集站会被收录。
+sources:
+    - name: 发现·api.niuniuzy.me
+      url: https://api.niuniuzy.me/api.php/provide/vod
+      api: ""
+      type: collect
+      category: ""
+      spider: ""
+      headers: {}
+      skip: false
+      local_jar: false
+    - name: 发现·suoniapi.com
+      url: https://suoniapi.com/api.php/provide/vod
+      api: ""
+      type: collect
+      category: ""
+      spider: ""
+      headers: {}
+      skip: false
+      local_jar: false
+    - name: 发现·bfzyapi.com
+      url: https://bfzyapi.com/api.php/provide/vod/?ac=list
+      api: ""
+      type: collect
+      category: ""
+      spider: ""
+      headers: {}
+      skip: false
+      local_jar: false
+    - name: 发现·api.ddapi.cc
+      url: https://api.ddapi.cc/api.php/provide/vod/
+      api: ""
+      type: collect
+      category: ""
+      spider: ""
+      headers: {}
+      skip: false
+      local_jar: false
+    - name: 发现·lbapi9.com
+      url: https://lbapi9.com/api.php/provide/vod/
+      api: ""
+      type: collect
+      category: ""
+      spider: ""
+      headers: {}
+      skip: false
+      local_jar: false
+    - name: 发现·fhapi9.com
+      url: http://fhapi9.com/api.php/provide/vod/
+      api: ""
+      type: collect
+      category: ""
+      spider: ""
+      headers: {}
+      skip: false
+      local_jar: false
+    - name: 发现·cj.lziapi.com
+      url: https://cj.lziapi.com/api.php/provide/vod/?ac=detail&t=37&pg=#篮球$https://cj.lziapi.com/api.php/provide/vod/?ac=detail&t=38&pg=#网球$https://cj.lziapi.com/api.php/provide/vod/?ac=detail&t=39&pg=#斯诺克$https://cj.lziapi.com/api.php/provide/vod/?ac=detail&t=40&pg=
+      api: ""
+      type: collect
+      category: ""
+      spider: ""
+      headers: {}
+      skip: false
+      local_jar: false
+    - name: 发现·naixxzy.com
+      url: https://naixxzy.com/api.php/provide/vod/
+      api: ""
+      type: collect
+      category: ""
+      spider: ""
+      headers: {}
+      skip: false
+      local_jar: false
+    - name: 发现·www.hongniuzy2.com
+      url: https://www.hongniuzy2.com/api.php/provide/vod/
+      api: ""
+      type: collect
+      category: ""
+      spider: ""
+      headers: {}
+      skip: false
+      local_jar: false
+    - name: 发现·bfzyapi.com
+      url: https://bfzyapi.com/api.php/provide/vod
+      api: ""
+      type: collect
+      category: ""
+      spider: ""
+      headers: {}
+      skip: false
+      local_jar: false
+    - name: 发现·lbapi9.com
+      url: https://lbapi9.com/api.php/provide/vod
+      api: ""
+      type: collect
+      category: ""
+      spider: ""
+      headers: {}
+      skip: false
+      local_jar: false
+    - name: 发现·shayuapi.com
+      url: https://shayuapi.com/api.php/provide/vod
+      api: ""
+      type: collect
+      category: ""
+      spider: ""
+      headers: {}
+      skip: false
+      local_jar: false
+    - name: 发现·cj.lzcaiji.com
+      url: https://cj.lzcaiji.com/api.php/provide/vod/from/liangzi/?ac=list
+      api: ""
+      type: collect
+      category: ""
+      spider: ""
+      headers: {}
+      skip: false
+      local_jar: false
+    - name: 发现·91md.me
+      url: https://91md.me/api.php/provide/vod/
+      api: ""
+      type: collect
+      category: ""
+      spider: ""
+      headers: {}
+      skip: false
+      local_jar: false
+    - name: 发现·dadiapi.com
+      url: http://dadiapi.com/api.php/provide/vod
+      api: ""
+      type: collect
+      category: ""
+      spider: ""
+      headers: {}
+      skip: false
+      local_jar: false
+    - name: 发现·shayuapi.com
+      url: https://shayuapi.com/api.php/provide/vod/
+      api: ""
+      type: collect
+      category: ""
+      spider: ""
+      headers: {}
+      skip: false
+      local_jar: false
+    - name: 发现·91md.me
+      url: https://91md.me/api.php/provide/vod/at/json
+      api: ""
+      type: collect
+      category: ""
+      spider: ""
+      headers: {}
+      skip: false
+      local_jar: false
+    - name: 发现·chujia.cc
+      url: http://chujia.cc/api.php/provide/vod/from/m3u8/
+      api: ""
+      type: collect
+      category: ""
+      spider: ""
+      headers: {}
+      skip: false
+      local_jar: false
+    - name: 发现·jkunzyapi.com
+      url: https://jkunzyapi.com/api.php/provide/vod/
+      api: ""
+      type: collect
+      category: ""
+      spider: ""
+      headers: {}
+      skip: false
+      local_jar: false
+    - name: 发现·cj.ffzyapi.com
+      url: http://cj.ffzyapi.com/api.php/provide/vod
+      api: ""
+      type: collect
+      category: ""
+      spider: ""
+      headers: {}
+      skip: false
+      local_jar: false
+    - name: 发现·madouse.la
+      url: http://madouse.la/api.php/provide/vod/
+      api: ""
+      type: collect
+      category: ""
+      spider: ""
+      headers: {}
+      skip: false
+      local_jar: false
+    - name: 发现·ckzy.me
+      url: https://ckzy.me/api.php/provide/vod/
+      api: ""
+      type: collect
+      category: ""
+      spider: ""
+      headers: {}
+      skip: false
+      local_jar: false
+    - name: 发现·cj.lziapi.com
+      url: http://cj.lziapi.com/api.php/provide/vod/
+      api: ""
+      type: collect
+      category: ""
+      spider: ""
+      headers: {}
+      skip: false
+      local_jar: false
+    - name: 发现·apilj.com
+      url: http://apilj.com/api.php/provide/vod/at/json/
+      api: ""
+      type: collect
+      category: ""
+      spider: ""
+      headers: {}
+      skip: false
+      local_jar: false
+    - name: 发现·91md.me
+      url: http://91md.me/api.php/provide/vod/
+      api: ""
+      type: collect
+      category: ""
+      spider: ""
+      headers: {}
+      skip: false
+      local_jar: false
+    - name: 发现·api.ukuapi.com
+      url: https://api.ukuapi.com/api.php/provide/vod/
+      api: ""
+      type: collect
+      category: ""
+      spider: ""
+      headers: {}
+      skip: false
+      local_jar: false
+    - name: 发现·jinyingzy.com
+      url: http://jinyingzy.com/provide/vod/
+      api: ""
+      type: collect
+      category: ""
+      spider: ""
+      headers: {}
+      skip: false
+      local_jar: false
+    - name: 发现·cj.lziapi.com
+      url: https://cj.lziapi.com/api.php/provide/vod
+      api: ""
+      type: collect
+      category: ""
+      spider: ""
+      headers: {}
+      skip: false
+      local_jar: false
+    - name: 发现·fhapi9.com
+      url: http://fhapi9.com/api.php/provide/vod/at/json
+      api: ""
+      type: collect
+      category: ""
+      spider: ""
+      headers: {}
+      skip: false
+      local_jar: false
+    - name: 发现·caiji.dyttzyapi.com
+      url: http://caiji.dyttzyapi.com/api.php/provide/vod
+      api: ""
+      type: collect
+      category: ""
+      spider: ""
+      headers: {}
+      skip: false
+      local_jar: false
+    - name: 发现·vnzyz.com
+      url: https://vnzyz.com/api.php/provide/vod
+      api: ""
+      type: collect
+      category: ""
+      spider: ""
+      headers: {}
+      skip: false
+      local_jar: false
+    - name: 发现·api.ddapi.cc
+      url: https://api.ddapi.cc/api.php/provide/vod
+      api: ""
+      type: collect
+      category: ""
+      spider: ""
+      headers: {}
+      skip: false
+      local_jar: false
+    - name: 发现·apidanaizi.com
+      url: https://apidanaizi.com/api.php/provide/vod
+      api: ""
+      type: collect
+      category: ""
+      spider: ""
+      headers: {}
+      skip: false
+      local_jar: false
+    - name: 发现·sdzyapi.com
+      url: http://sdzyapi.com/api.php/provide/vod/
+      api: ""
+      type: collect
+      category: ""
+      spider: ""
+      headers: {}
+      skip: false
+      local_jar: false
+    - name: 发现·155api.com
+      url: https://155api.com/api.php/provide/vod/
+      api: ""
+      type: collect
+      category: ""
+      spider: ""
+      headers: {}
+      skip: false
+      local_jar: false
+    - name: 发现·api.wujinapi.me
+      url: https://api.wujinapi.me/api.php/provide/vod/`
+      api: ""
+      type: collect
+      category: ""
+      spider: ""
+      headers: {}
+      skip: false
+      local_jar: false
+    - name: 发现·www.ffzy.tv
+      url: http://www.ffzy.tv/api.php/provide/vod/`
+      api: ""
+      type: collect
+      category: ""
+      spider: ""
+      headers: {}
+      skip: false
+      local_jar: false
+    - name: 发现·suoniapi.com
+      url: https://suoniapi.com/api.php/provide/vod/from/snm3u8/
+      api: ""
+      type: collect
+      category: ""
+      spider: ""
+      headers: {}
+      skip: false
+      local_jar: false
+    - name: 发现·caiji.kuaichezy.org
+      url: https://caiji.kuaichezy.org/api.php/provide/vod/?ac=list`
+      api: ""
+      type: collect
+      category: ""
+      spider: ""
+      headers: {}
+      skip: false
+      local_jar: false
+    - name: 发现·apiyutu.com
+      url: https://apiyutu.com/api.php/provide/vod/
+      api: ""
+      type: collect
+      category: ""
+      spider: ""
+      headers: {}
+      skip: false
+      local_jar: false
+    - name: 发现·bfzyapi.com
+      url: https://bfzyapi.com/api.php/provide/vod/at/xml`
+      api: ""
+      type: collect
+      category: ""
+      spider: ""
+      headers: {}
+      skip: false
+      local_jar: false
+    - name: 发现·api.maoyanapi.top
+      url: https://api.maoyanapi.top/api.php/provide/vod/at/xml`
+      api: ""
+      type: collect
+      category: ""
+      spider: ""
+      headers: {}
+      skip: false
+      local_jar: false
+    - name: 发现·apilj.com
+      url: https://apilj.com/api.php/provide/vod/
+      api: ""
+      type: collect
+      category: ""
+      spider: ""
+      headers: {}
+      skip: false
+      local_jar: false
