@@ -129,11 +129,9 @@ func stripJSONComments(body []byte) []byte {
 	return out
 }
 
-// normalizeSiteType 将订阅配置中的站点类型归一化：type 3（csp 爬虫源）映射为爬虫站。
+// normalizeSiteType 保留订阅配置中的原始类型数值（0/1/3），不做映射。
+// 客户端需要原始 type（如 csp 源为 3），映射为 1 会导致客户端无法加载。
 func normalizeSiteType(s model.Site) model.Site {
-	if s.Type != nil && s.Type.Value == 3 {
-		s.Type = model.IntPtr(1)
-	}
 	return s
 }
 

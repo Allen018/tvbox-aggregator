@@ -107,8 +107,8 @@ sources:
 	if !strings.Contains(spider.Name, "订阅动漫站") {
 		t.Errorf("订阅版末位应为订阅提取的爬虫站，实际 name=%q", spider.Name)
 	}
-	if spider.Type == nil || spider.Type.Value != 1 {
-		t.Error("爬虫站 type 应为 1")
+	if spider.Type == nil || spider.Type.Value != 3 {
+		t.Errorf("订阅提取的 csp 源应保留原始 type=3，实际 %+v", spider.Type)
 	}
 	if spider.Spider != srv.URL+"/x.jar" {
 		t.Errorf("订阅提取 spider 应解析为绝对地址且不重写，实际 %q", spider.Spider)

@@ -101,9 +101,9 @@ func TestFetchSubscriptionSites(t *testing.T) {
 	if len(res.Sites) != 2 {
 		t.Fatalf("期望 2 个站点，实际 %d", len(res.Sites))
 	}
-	// type 3 应映射为爬虫站（1）
-	if res.Sites[0].Type == nil || res.Sites[0].Type.Value != 1 {
-		t.Errorf("type 3 应映射为 1，实际 %+v", res.Sites[0].Type)
+	// type 3 应保留原始类型（客户端需要原始 type，不再映射为 1）
+	if res.Sites[0].Type == nil || res.Sites[0].Type.Value != 3 {
+		t.Errorf("type 3 应保留为 3，实际 %+v", res.Sites[0].Type)
 	}
 	// 全局 spider 应用于未声明 spider 的站点，相对路径应解析为绝对地址
 	if res.Sites[0].Spider != srv.URL+"/fty.jar" {

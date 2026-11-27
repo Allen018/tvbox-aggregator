@@ -427,14 +427,16 @@ func addExtracted(dst *[]model.SourceConfig, seen map[string]bool, src model.Sou
 // toSubscriptionSite 将订阅中解析出的站点转为源池条目。
 // 爬虫站：API 保留原始 spider 名/JS 地址（客户端使用），URL 设为订阅地址（延迟探测目标）；
 // 采集站：API 与 URL 均为采集站 API 地址。
+// OutputType 保留原始类型数值（0/1/3），客户端需要原始 type（如 csp 源为 3）。
 func toSubscriptionSite(s model.Site, subURL string) model.SourceConfig {
 	src := model.SourceConfig{
-		Name: s.Name,
-		URL:  s.API,
-		API:  s.API,
-		Type: "collect",
+		Name:       s.Name,
+		URL:        s.API,
+		API:        s.API,
+		Type:       "collect",
+		OutputType: s.Type.Value,
 	}
-	if s.Type != nil && s.Type.Value == 1 {
+	if s.Type != nil && (s.Type.Value == 1 || s.Type.Value == 3) {
 		src.Type = "spider"
 		src.Spider = s.Spider
 		src.URL = subURL

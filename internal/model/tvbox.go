@@ -294,15 +294,16 @@ type TestResult struct {
 
 // SourceConfig 源池配置项（config/sources.yaml）。
 type SourceConfig struct {
-	Name     string            `yaml:"name"`
-	URL      string            `yaml:"url"`
-	API      string            `yaml:"api"` // 站点 api 地址（采集站 API / 爬虫站 spider 名或 JS 地址）；缺省用 URL
-	Type     string            `yaml:"type"` // collect=采集站（可测速）spider=爬虫站（免测）subscription=订阅式源（抓取配置提取站点）
-	Category string            `yaml:"category"` // 分组标注（预留）
-	Spider   string            `yaml:"spider"`   // 爬虫站 spider jar 原始地址（可被本地化重写）
-	Headers  map[string]string `yaml:"headers"`  // 按源自定义请求头（反爬校验）
-	Skip     bool              `yaml:"skip"`     // 跳过测速（仍参与配置输出）
-	LocalJar bool              `yaml:"local_jar"` // 爬虫站 spider 地址是否重写为本地托管（需 jar 已放入仓库 jar/ 目录）
+	Name       string            `yaml:"name"`
+	URL        string            `yaml:"url"`
+	API        string            `yaml:"api"` // 站点 api 地址（采集站 API / 爬虫站 spider 名或 JS 地址）；缺省用 URL
+	Type       string            `yaml:"type"` // collect=采集站（可测速）spider=爬虫站（免测）subscription=订阅式源（抓取配置提取站点）
+	Category   string            `yaml:"category"` // 分组标注（预留）
+	Spider     string            `yaml:"spider"`   // 爬虫站 spider jar 原始地址（可被本地化重写）
+	Headers    map[string]string `yaml:"headers"`  // 按源自定义请求头（反爬校验）
+	Skip       bool              `yaml:"skip"`     // 跳过测速（仍参与配置输出）
+	LocalJar   bool              `yaml:"local_jar"` // 爬虫站 spider 地址是否重写为本地托管（需 jar 已放入仓库 jar/ 目录）
+	OutputType int               `yaml:"-"`         // 输出用类型数值（0/1/3），订阅提取时保留原始类型，客户端需要原始 type
 }
 
 // WhitelistEntry 国内保底源白名单项（config/whitelist.yaml）。

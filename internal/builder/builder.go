@@ -128,16 +128,24 @@ func (b *Builder) toSite(src model.SourceConfig, res *model.TestResult, whitelis
 	if api == "" {
 		api = src.URL
 	}
+	// 输出类型：订阅提取的源保留原始类型数值（0/1/3），手动源按内部分类（采集 0 / 爬虫 1）
+	outType := 0
+	if src.Type == "spider" {
+		outType = 1
+	}
+	if src.OutputType > 0 {
+		outType = src.OutputType
+	}
 	s := model.Site{
 		Name:        src.Name,
-		Type:        model.IntPtr(0),
+		Type:        model.IntPtr(outType),
 		API:         api,
 		Searchable:  model.IntPtr(1),
 		QuickSearch: model.IntPtr(1),
 		SourceURL:   src.URL,
 	}
 	if src.Type == "spider" {
-		s.Type = model.IntPtr(1)
+		// 类型已在上方按 OutputType 设置（订阅提取的 csp 源为 3），此处不再覆盖
 		s.Spider = src.Spider
 		if res != nil {
 			// 爬虫站延迟探测结果（TTFB），用于订阅内排序
@@ -308,7 +316,8 @@ func (b *Builder) buildSubscription(sites []model.Site, probes map[string]*model
 		if isExcludedCategory(s.Name) {
 			continue
 		}
-		if s.Type != nil && s.Type.Value == 1 {
+		// 爬虫站：type 1 或 3（csp 源）均归入爬虫站段
+		if s.Type != nil && (s.Type.Value == 1 || s.Type.Value == 3) {
 			spider = append(spider, s)
 			continue
 		}
