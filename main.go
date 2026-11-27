@@ -266,6 +266,7 @@ func classify(err error) string {
 func probeSpiderLatency(ctx context.Context, f *fetcher.Fetcher, spiders []model.SourceConfig) map[string]*model.TestResult {
 	probes := make(map[string]*model.TestResult, len(spiders))
 	var wg sync.WaitGroup
+	var mu sync.Mutex              // 并发写 map 必须加锁，否则 runtime 会 fatal error: concurrent map writes
 	sem := make(chan struct{}, 20) // 并发收敛，爬虫站数量少、成本极低
 	for _, src := range spiders {
 		wg.Add(1)
@@ -297,7 +298,9 @@ func probeSpiderLatency(ctx context.Context, f *fetcher.Fetcher, spiders []model
 			default:
 				res.Error = fmt.Sprintf("HTTP %d，响应异常", status)
 			}
+			mu.Lock()
 			probes[src.URL] = res
+			mu.Unlock()
 		}(src)
 	}
 	wg.Wait()
@@ -460,6 +463,7 @@ func toSubscriptionSite(s model.Site, subURL string) model.SourceConfig {
 func probeWhitelist(ctx context.Context, f *fetcher.Fetcher, whitelist []model.WhitelistEntry) map[string]*model.WhitelistProbe {
 	probes := make(map[string]*model.WhitelistProbe, len(whitelist))
 	var wg sync.WaitGroup
+	var mu sync.Mutex              // 并发写 map 必须加锁
 	sem := make(chan struct{}, 20) // 白名单探测并发收敛，成本极低
 	for _, e := range whitelist {
 		wg.Add(1)
@@ -483,7 +487,9 @@ func probeWhitelist(ctx context.Context, f *fetcher.Fetcher, whitelist []model.W
 			default:
 				p.Error = fmt.Sprintf("HTTP %d，响应异常（可能被 WAF 拦截或源已失效）", status)
 			}
+			mu.Lock()
 			probes[e.URL] = p
+			mu.Unlock()
 		}(e)
 	}
 	wg.Wait()
