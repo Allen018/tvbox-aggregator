@@ -51,11 +51,15 @@ func (f *Fetcher) FetchSubscription(ctx context.Context, subURL string, headers 
 	var cfg model.TVBoxConfig
 	if err := json.Unmarshal(body, &cfg); err == nil && len(cfg.Sites) > 0 {
 		for _, s := range cfg.Sites {
+			// 相对 api（如 ./lib/drpy2.min.js）、ext、jar 都基于订阅地址解析。
+			// 否则客户端会以我们的配置域名为基准请求，必然 404。
+			s.API = resolveRef(subURL, s.API)
+			s.Ext = resolveRef(subURL, s.Ext)
 			// TVBox 读取站点级 jar（不是 spider）；未声明 jar 的站点继承订阅全局 spider。
 			if s.Jar == "" {
 				s.Jar = global.Spider
 			}
-			s.Jar = resolveSpiderPath(subURL, s.Jar)
+			s.Jar = resolveRef(subURL, s.Jar)
 			res.Sites = append(res.Sites, normalizeSiteType(s))
 		}
 		return res, nil
@@ -136,14 +140,18 @@ func normalizeSiteType(s model.Site) model.Site {
 	return s
 }
 
-// resolveSpiderPath 将订阅配置中的相对 jar/spider 路径解析为绝对地址。
-// 形如 "./fty.jar;md5;xxx" 的路径：分号前部分参与解析，保留 ";md5;xxx" 后缀供客户端校验。
-func resolveSpiderPath(base, spider string) string {
-	spider = strings.TrimSpace(spider)
-	if spider == "" {
-		return ""
+// resolveRef 将订阅配置中的相对路径（./、../、/）解析为基于订阅地址的绝对 URL。
+// csp_/py_ 类名、普通字符串（如 ext 说明文字）和已经是绝对 URL 的值原样返回。
+// 形如 "./fty.jar;md5;xxx" 的路径保留 ";md5;xxx" 后缀供客户端校验。
+func resolveRef(base, ref string) string {
+	ref = strings.TrimSpace(ref)
+	if ref == "" || strings.HasPrefix(ref, "csp_") || strings.HasPrefix(ref, "py_") || strings.Contains(ref, "://") {
+		return ref
 	}
-	path := spider
+	if !strings.HasPrefix(ref, ".") && !strings.HasPrefix(ref, "/") {
+		return ref
+	}
+	path := ref
 	suffix := ""
 	if i := strings.Index(path, ";"); i >= 0 {
 		path, suffix = path[:i], path[i:]
@@ -152,16 +160,13 @@ func resolveSpiderPath(base, spider string) string {
 	if path == "" {
 		return ""
 	}
-	if strings.Contains(path, "://") {
-		return path + suffix
-	}
 	u, err := url.Parse(base)
 	if err != nil {
-		return path + suffix
+		return ref
 	}
-	ref, err := u.Parse(path)
+	r, err := u.Parse(path)
 	if err != nil {
-		return path + suffix
+		return ref
 	}
-	return ref.String() + suffix
+	return r.String() + suffix
 }

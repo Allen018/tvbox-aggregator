@@ -34,6 +34,8 @@ func TestRunEndToEnd(t *testing.T) {
 				srv.URL))
 		case r.URL.Path == "/index.m3u8":
 			io.WriteString(w, playlist)
+		case r.URL.Path == "/x.jar":
+			io.WriteString(w, "JAR")
 		case strings.HasPrefix(r.URL.Path, "/seg"):
 			w.Write(segment)
 		case r.URL.Path == "/home":

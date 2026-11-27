@@ -122,6 +122,32 @@ func TestFetchSubscriptionSites(t *testing.T) {
 	}
 }
 
+func TestFetchSubscriptionRelativePaths(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		io.WriteString(w, `{
+			"spider": "./jar/a.jar;md5;abc",
+			"sites": [{"key":"js","name":"JS站","type":3,"api":"./lib/drpy2.min.js","ext":"./js/a.js"}]
+		}`)
+	}))
+	defer srv.Close()
+
+	f := New(10 * time.Second)
+	res, err := f.FetchSubscription(context.Background(), srv.URL, nil)
+	if err != nil {
+		t.Fatalf("FetchSubscription 报错: %v", err)
+	}
+	s := res.Sites[0]
+	if s.API != srv.URL+"/lib/drpy2.min.js" {
+		t.Errorf("相对 api 未解析: %q", s.API)
+	}
+	if s.Ext != srv.URL+"/js/a.js" {
+		t.Errorf("相对 ext 未解析: %q", s.Ext)
+	}
+	if s.Jar != srv.URL+"/jar/a.jar;md5;abc" {
+		t.Errorf("相对 jar 未解析: %q", s.Jar)
+	}
+}
+
 func TestFetchSubscriptionURLs(t *testing.T) {
 	// 模拟地址列表格式
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

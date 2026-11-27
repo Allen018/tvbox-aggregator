@@ -335,6 +335,7 @@ func (b *Builder) buildSubscription(sites []model.Site, probes map[string]*model
 		topN = defaultTopN
 	}
 	var wl, ranked, spider []model.Site
+	spiderSeen := map[string]bool{}
 	for _, s := range sites {
 		// 内容类别排除（教育/网盘/磁力/相声/小品/音乐/戏曲/体育/央视直播/工具存储）
 		if isExcludedCategory(s.Name) {
@@ -342,6 +343,14 @@ func (b *Builder) buildSubscription(sites []model.Site, probes map[string]*model
 		}
 		// 爬虫站：用内部标记判断，不能用 type（JSON CMS 也是 type 1）
 		if s.IsSpider {
+			// 同一 csp 类 + 同一 jar 的站点功能重复，只保留首次出现者，避免浪费名额
+			if s.API != "" {
+				sig := s.API + "|" + s.Jar
+				if spiderSeen[sig] {
+					continue
+				}
+				spiderSeen[sig] = true
+			}
 			spider = append(spider, s)
 			continue
 		}

@@ -18,6 +18,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -121,6 +122,21 @@ func run(sourcesPath, whitelistPath, discoverPath, discoveredOut, outDir, jarBas
 	allSources := append(append(poolSources, extractedSources...), discovered...)
 	log.Printf("加载源池 %d 个（人工采集站 %d / 爬虫站 %d，订阅提取 %d，发现源 %d），白名单 %d 个",
 		len(allSources), countCollect(poolSources), countSpider(poolSources), len(extractedSources), len(discovered), len(whitelist))
+
+	// 剔除依赖文件已 404 的爬虫站（如失效 jar / 相对 js 路径解析后的 404）
+	deadArtifacts := probeArtifacts(ctx, f, allSources)
+	if len(deadArtifacts) > 0 {
+		before := len(allSources)
+		kept := make([]model.SourceConfig, 0, before)
+		for _, src := range allSources {
+			if src.Type == "spider" && (deadArtifacts[artifactURL(src.Jar)] || deadArtifacts[artifactURL(src.API)]) {
+				continue
+			}
+			kept = append(kept, src)
+		}
+		log.Printf("依赖文件 404，剔除爬虫站 %d 个", before-len(kept))
+		allSources = kept
+	}
 
 	// 白名单 URL 集合：命中白名单的采集站不做全量测速，改为存活探测
 	wlURLs := make(map[string]model.WhitelistEntry, len(whitelist))
@@ -494,6 +510,61 @@ func probeWhitelist(ctx context.Context, f *fetcher.Fetcher, whitelist []model.W
 	}
 	wg.Wait()
 	return probes
+}
+
+// artifactURL 提取爬虫站依赖的 jar/js/py 文件地址（去掉 ;md5; 后缀）。
+// csp_/py_ 类名与相对路径不在此检查（相对路径已在订阅解析阶段绝对化）。
+func artifactURL(raw string) string {
+	raw = strings.TrimSpace(raw)
+	if raw == "" || strings.HasPrefix(raw, "csp_") || strings.HasPrefix(raw, "py_") {
+		return ""
+	}
+	if i := strings.Index(raw, ";"); i >= 0 {
+		raw = raw[:i]
+	}
+	if !strings.Contains(raw, "://") {
+		return ""
+	}
+	return raw
+}
+
+// probeArtifacts 探测爬虫站依赖的 jar/js/py 文件是否真实存在。
+// 仅对确定的 404/410 判死；403/5xx/超时一律保留（可能是海外封锁或临时故障）。
+func probeArtifacts(ctx context.Context, f *fetcher.Fetcher, sources []model.SourceConfig) map[string]bool {
+	candidates := map[string]bool{}
+	for _, s := range sources {
+		if s.Type != "spider" {
+			continue
+		}
+		if u := artifactURL(s.Jar); u != "" {
+			candidates[u] = true
+		}
+		if u := artifactURL(s.API); u != "" {
+			candidates[u] = true
+		}
+	}
+	dead := make(map[string]bool)
+	var wg sync.WaitGroup
+	var mu sync.Mutex
+	sem := make(chan struct{}, 10)
+	for u := range candidates {
+		wg.Add(1)
+		sem <- struct{}{}
+		go func(u string) {
+			defer wg.Done()
+			defer func() { <-sem }()
+			pctx, cancel := context.WithTimeout(ctx, 8*time.Second)
+			defer cancel()
+			_, status, err := f.FetchRaw(pctx, u, nil)
+			if err == nil && (status == http.StatusNotFound || status == http.StatusGone) {
+				mu.Lock()
+				dead[u] = true
+				mu.Unlock()
+			}
+		}(u)
+	}
+	wg.Wait()
+	return dead
 }
 
 // ---------------------------------------------------------------------------
