@@ -176,7 +176,7 @@ func TestBuildSubscriptionTopN(t *testing.T) {
 func TestBuildSubscriptionDefaultTopN(t *testing.T) {
 	b := New("", "dist")
 	var sites []model.Site
-	for i := 0; i < 60; i++ {
+	for i := 0; i < 120; i++ {
 		sites = append(sites, model.Site{
 			Name:      fmt.Sprintf("影视源%d", i),
 			SourceURL: fmt.Sprintf("http://s%d.com/api", i),

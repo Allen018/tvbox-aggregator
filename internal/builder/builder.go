@@ -16,8 +16,8 @@ import (
 	"tvbox-aggregator/internal/model"
 )
 
-// defaultTopN 订阅源默认收录数量。
-const defaultTopN = 50
+// defaultTopN 订阅源默认收录数量（与 config/sources.yaml 的 top_n 保持一致）。
+const defaultTopN = 80
 
 // excludeCategoryKeywords 订阅清洗：排除的内容类别关键词。
 // 覆盖教育、网盘、磁力、相声、小品、音乐、戏曲、体育、央视/直播、工具/存储等非影视点播内容。

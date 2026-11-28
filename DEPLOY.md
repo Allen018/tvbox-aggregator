@@ -77,7 +77,7 @@ git push -u origin main
 
 切换到 **`dist` 分支**后，仓库根目录应出现：
 
-- `dist/tvbox.json`（单一订阅版，50 条源）
+- `dist/tvbox.json`（单一订阅版，80 条源）
 - `dist/status.json`（诊断文件）
 - `dist/discovered.yaml`（发现源池，供下一轮复用）
 
