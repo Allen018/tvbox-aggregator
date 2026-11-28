@@ -119,18 +119,22 @@ func TestBuildSubscriptionSpiderDiverseSort(t *testing.T) {
 func TestBuildSubscriptionCategoryExclusion(t *testing.T) {
 	b := New("", "dist")
 	sites := []model.Site{
-		{Name: "⚽八八┃看球", Type: model.IntPtr(1), Status: model.StatusOK, SourceURL: "http://s1.com/"},  // 体育 → 排除
-		{Name: "📚初中┃课堂", Type: model.IntPtr(1), Status: model.StatusOK, SourceURL: "http://s2.com/"},  // 教育 → 排除
-		{Name: "🎬热播┃影视", Type: model.IntPtr(1), Status: model.StatusOK, SourceURL: "http://s3.com/"},  // 影视 → 保留
-		{Name: "🧲新6V┃磁力", Type: model.IntPtr(1), Status: model.StatusOK, SourceURL: "http://s4.com/"}, // 磁力 → 排除
-		{Name: "🐻剧圈┃影视", Type: model.IntPtr(1), Status: model.StatusOK, SourceURL: "http://s5.com/"},  // 影视 → 保留
-		{Name: "🐾日本┃动漫", Type: model.IntPtr(1), Status: model.StatusOK, SourceURL: "http://s6.com/"},  // 动漫 → 保留
-		{Name: "🎵音乐┃MV", Type: model.IntPtr(1), Status: model.StatusOK, SourceURL: "http://s7.com/"},  // 音乐 → 排除
-		{Name: "📺综艺┃热播", Type: model.IntPtr(1), Status: model.StatusOK, SourceURL: "http://s8.com/"},  // 综艺 → 保留
-		{Name: "🌞光影┃不卡", Type: model.IntPtr(1), Status: model.StatusOK, SourceURL: "http://s9.com/"},  // 通用影视 → 保留
-		{Name: "📺哔哩哔哩", Type: model.IntPtr(1), Status: model.StatusOK, SourceURL: "http://s10.com/"},  // 哔哩 → 排除
-		{Name: "推送中心", Type: model.IntPtr(1), Status: model.StatusOK, SourceURL: "http://s11.com/"},   // 推送 → 排除
-		{Name: "宜搜搜索", Type: model.IntPtr(1), Status: model.StatusOK, SourceURL: "http://s12.com/"},   // 搜索 → 排除
+		{Name: "⚽八八┃看球", Type: model.IntPtr(1), Status: model.StatusOK, SourceURL: "http://s1.com/"},                                                               // 体育 → 排除
+		{Name: "📚初中┃课堂", Type: model.IntPtr(1), Status: model.StatusOK, SourceURL: "http://s2.com/"},                                                               // 教育 → 排除
+		{Name: "🎬热播┃影视", Type: model.IntPtr(1), Status: model.StatusOK, SourceURL: "http://s3.com/"},                                                               // 影视 → 保留
+		{Name: "🧲新6V┃磁力", Type: model.IntPtr(1), Status: model.StatusOK, SourceURL: "http://s4.com/"},                                                              // 磁力 → 排除
+		{Name: "🐻剧圈┃影视", Type: model.IntPtr(1), Status: model.StatusOK, SourceURL: "http://s5.com/"},                                                               // 影视 → 保留
+		{Name: "🐾日本┃动漫", Type: model.IntPtr(1), Status: model.StatusOK, SourceURL: "http://s6.com/"},                                                               // 动漫 → 保留
+		{Name: "🎵音乐┃MV", Type: model.IntPtr(1), Status: model.StatusOK, SourceURL: "http://s7.com/"},                                                               // 音乐 → 排除
+		{Name: "📺综艺┃热播", Type: model.IntPtr(1), Status: model.StatusOK, SourceURL: "http://s8.com/"},                                                               // 综艺 → 保留
+		{Name: "🌞光影┃不卡", Type: model.IntPtr(1), Status: model.StatusOK, SourceURL: "http://s9.com/"},                                                               // 通用影视 → 保留
+		{Name: "📺哔哩哔哩", Type: model.IntPtr(1), Status: model.StatusOK, SourceURL: "http://s10.com/"},                                                               // 哔哩 → 排除
+		{Name: "推送中心", Type: model.IntPtr(1), Status: model.StatusOK, SourceURL: "http://s11.com/"},                                                                // 推送 → 排除
+		{Name: "宜搜搜索", Type: model.IntPtr(1), Status: model.StatusOK, SourceURL: "http://s12.com/"},                                                                // 搜索 → 排除
+		{Name: "玩偶哥哥｜4K弹幕", API: "csp_WoGGuard", Type: model.IntPtr(3), Status: model.StatusOK, SourceURL: "http://s13.com/"},                                      // 网盘系列 → 排除
+		{Name: "弹幕｜玩偶[jar]", API: "csp_Wogg", Type: model.IntPtr(3), Status: model.StatusOK, SourceURL: "http://s14.com/"},                                         // 网盘系列 → 排除
+		{Name: "聚剧剧｜四盘", API: "csp_Seedhub", Type: model.IntPtr(3), Status: model.StatusOK, SourceURL: "http://s15.com/"},                                          // 泛“盘” → 排除
+		{Name: "普通影视", API: "csp_Alist", Ext: "http://alist.example.com/config.json", Type: model.IntPtr(3), Status: model.StatusOK, SourceURL: "http://s16.com/"}, // ext 网盘 → 排除
 	}
 	cfg := b.buildSubscription(sites, nil, 25)
 	// 排除体育/教育/磁力/音乐，保留影视/动漫/综艺及通用影视源

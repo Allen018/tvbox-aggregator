@@ -45,6 +45,8 @@ var excludeCategoryKeywords = []string{
 	"本地存储", "云搜", "小纸条", "Up搜",
 	// 哔哩系 / 推送 / 搜索类（非点播影视源）
 	"哔哩", "推送", "搜索",
+	// 网盘类：泛匹配“盘”字（四盘/多盘/网盘等）与已知网盘系列“玩偶”
+	"盘", "玩偶",
 }
 
 // isExcludedCategory 判断站点名称是否属于排除的内容类别（大小写不敏感）。
@@ -52,6 +54,35 @@ func isExcludedCategory(name string) bool {
 	lower := strings.ToLower(name)
 	for _, k := range excludeCategoryKeywords {
 		if strings.Contains(lower, k) {
+			return true
+		}
+	}
+	return false
+}
+
+// webDiskAPIPrefixes 已知网盘类 csp 类名前缀。
+var webDiskAPIPrefixes = []string{
+	"csp_wo", "csp_seedhub", "csp_alist", "csp_quark", "csp_baidu",
+	"csp_115", "csp_pikpak", "csp_webdav", "csp_tianyi", "csp_cloud", "csp_pan",
+}
+
+// webDiskExtKeywords ext 中指向网盘配置的关键词。
+var webDiskExtKeywords = []string{
+	"alist", "quark", "baidu", "115", "pikpak", "webdav", "seedhub", "网盘", "云盘",
+}
+
+// isWebDisk 根据 api 类名与 ext 内容识别网盘站。
+// 名称层面的网盘关键词已由 isExcludedCategory 覆盖。
+func isWebDisk(s model.Site) bool {
+	api := strings.ToLower(s.API)
+	for _, p := range webDiskAPIPrefixes {
+		if strings.HasPrefix(api, p) {
+			return true
+		}
+	}
+	ext := strings.ToLower(s.Ext)
+	for _, k := range webDiskExtKeywords {
+		if strings.Contains(ext, k) {
 			return true
 		}
 	}
@@ -344,8 +375,8 @@ func (b *Builder) buildSubscription(sites []model.Site, probes map[string]*model
 	var wl, ranked, spider []model.Site
 	spiderSeen := map[string]bool{}
 	for _, s := range sites {
-		// 内容类别排除（教育/网盘/磁力/相声/小品/音乐/戏曲/体育/央视直播/工具存储）
-		if isExcludedCategory(s.Name) {
+		// 内容类别排除 + 网盘站识别（名称/api/ext 三层）
+		if isExcludedCategory(s.Name) || isWebDisk(s) {
 			continue
 		}
 		// 爬虫站：用内部标记判断，不能用 type（JSON CMS 也是 type 1）
