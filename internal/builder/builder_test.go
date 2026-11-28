@@ -135,6 +135,9 @@ func TestBuildSubscriptionCategoryExclusion(t *testing.T) {
 		{Name: "弹幕｜玩偶[jar]", API: "csp_Wogg", Type: model.IntPtr(3), Status: model.StatusOK, SourceURL: "http://s14.com/"},                                         // 网盘系列 → 排除
 		{Name: "聚剧剧｜四盘", API: "csp_Seedhub", Type: model.IntPtr(3), Status: model.StatusOK, SourceURL: "http://s15.com/"},                                          // 泛“盘” → 排除
 		{Name: "普通影视", API: "csp_Alist", Ext: "http://alist.example.com/config.json", Type: model.IntPtr(3), Status: model.StatusOK, SourceURL: "http://s16.com/"}, // ext 网盘 → 排除
+		{Name: "應用商店", API: "csp_Market", Type: model.IntPtr(3), Status: model.StatusOK, SourceURL: "http://s17.com/"},                                             // 非点播工具 → 排除
+		{Name: "科普 | 急救[jar]", API: "csp_FirstAid", Type: model.IntPtr(3), Status: model.StatusOK, SourceURL: "http://s18.com/"},                                   // 非点播工具 → 排除
+		{Name: "配置 | 中心[jar]", API: "csp_Config", Ext: "http://x/token.json", Type: model.IntPtr(3), Status: model.StatusOK, SourceURL: "http://s19.com/"},         // 非点播工具 → 排除
 	}
 	cfg := b.buildSubscription(sites, nil, 25)
 	// 排除体育/教育/磁力/音乐，保留影视/动漫/综艺及通用影视源
