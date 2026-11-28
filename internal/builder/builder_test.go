@@ -128,6 +128,9 @@ func TestBuildSubscriptionCategoryExclusion(t *testing.T) {
 		{Name: "🎵音乐┃MV", Type: model.IntPtr(1), Status: model.StatusOK, SourceURL: "http://s7.com/"},  // 音乐 → 排除
 		{Name: "📺综艺┃热播", Type: model.IntPtr(1), Status: model.StatusOK, SourceURL: "http://s8.com/"},  // 综艺 → 保留
 		{Name: "🌞光影┃不卡", Type: model.IntPtr(1), Status: model.StatusOK, SourceURL: "http://s9.com/"},  // 通用影视 → 保留
+		{Name: "📺哔哩哔哩", Type: model.IntPtr(1), Status: model.StatusOK, SourceURL: "http://s10.com/"},  // 哔哩 → 排除
+		{Name: "推送中心", Type: model.IntPtr(1), Status: model.StatusOK, SourceURL: "http://s11.com/"},   // 推送 → 排除
+		{Name: "宜搜搜索", Type: model.IntPtr(1), Status: model.StatusOK, SourceURL: "http://s12.com/"},   // 搜索 → 排除
 	}
 	cfg := b.buildSubscription(sites, nil, 25)
 	// 排除体育/教育/磁力/音乐，保留影视/动漫/综艺及通用影视源
