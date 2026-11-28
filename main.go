@@ -75,37 +75,37 @@ func run(sourcesPath, whitelistPath, discoverPath, discoveredOut, outDir, jarBas
 	f := fetcher.New(fetchTimeout)
 	prober := tester.NewProber(f.Client(), probeTimeout)
 
-	// ---- 自动发现（一期双通道：GitHub 代码搜索 + 聚合索引站）----
-	// 发现源验证通过后与人工源池合并，人工源保持最高信任级
+	// ---- 自动发现（GitHub 搜索 + clbug 聚合页 + 索引站）----
+	// 发现源经观察期（连续 2 轮成功）才晋升，人工源保持最高信任级
 	var discovered []model.SourceConfig
 	discoverCfg, err := discover.LoadConfig(discoverPath)
 	if err != nil {
 		return err
 	}
-	prevDiscovered := loadDiscovered(discoveredOut)
+	prevPool := loadDiscovered(discoveredOut)
 	if discoverCfg.Enabled {
-		existing := make(map[string]bool, len(sources)+len(whitelist)+len(prevDiscovered))
+		existing := make(map[string]bool, len(sources)+len(whitelist)+len(prevPool))
 		for _, s := range sources {
 			existing[s.URL] = true
 		}
 		for _, e := range whitelist {
 			existing[e.URL] = true
 		}
-		for _, p := range prevDiscovered {
+		for _, p := range prevPool {
 			existing[p.URL] = true
 		}
 		disc := discover.New(discoverCfg, f, os.Getenv("GITHUB_TOKEN"))
-		discovered, err = disc.Run(ctx, existing, prevDiscovered)
+		var pool []model.SourceConfig
+		discovered, pool, err = disc.Run(ctx, existing, prevPool)
 		if err != nil {
 			log.Printf("自动发现失败（沿用上轮发现池）: %v", err)
-			discovered = prevDiscovered
+			discovered, pool = promotedOnly(prevPool), prevPool
 		}
-		if err := discover.Save(discoveredOut, discovered); err != nil {
+		if err := discover.Save(discoveredOut, pool); err != nil {
 			log.Printf("发现源池写入失败: %v", err)
 		}
 	} else {
-		// 发现禁用时沿用上轮发现池
-		discovered = prevDiscovered
+		discovered = promotedOnly(prevPool)
 	}
 
 	// ---- 订阅式源处理：抓取配置 → 提取站点 → 合并入池 ----
@@ -700,6 +700,17 @@ func loadDiscovered(path string) []model.SourceConfig {
 		return nil
 	}
 	return cfg.Sources
+}
+
+// promotedOnly 只保留观察期中已晋升的发现源，避免未观察完成的候选进入产物。
+func promotedOnly(sources []model.SourceConfig) []model.SourceConfig {
+	out := make([]model.SourceConfig, 0, len(sources))
+	for _, s := range sources {
+		if s.Promoted {
+			out = append(out, s)
+		}
+	}
+	return out
 }
 
 func isWhitelisted(src model.SourceConfig, wlURLs map[string]model.WhitelistEntry) bool {

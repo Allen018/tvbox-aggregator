@@ -389,6 +389,11 @@ type SourceConfig struct {
 	LocalJar   bool              `yaml:"local_jar"`   // 爬虫站 spider 地址是否重写为本地托管（需 jar 已放入仓库 jar/ 目录）
 	OutputType int               `yaml:"output_type"` // 输出用类型数值（0/1/3），订阅提取时保留原始类型，客户端需要原始 type
 	JarTTFB    int64             `yaml:"-"`           // 依赖 JAR 的探测延迟（毫秒），用于优选全局 spider
+
+	// 自动发现观察期状态：连续 2 轮成功才正式入池，失败保留 3 轮宽限。
+	SuccessRuns int  `yaml:"success_runs"`
+	FailRuns    int  `yaml:"fail_runs"`
+	Promoted    bool `yaml:"promoted"`
 }
 
 // WhitelistEntry 国内保底源白名单项（config/whitelist.yaml）。

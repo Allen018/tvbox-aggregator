@@ -14,6 +14,7 @@ import (
 	"log"
 	"os"
 	"regexp"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -44,12 +45,14 @@ type GitHubConfig struct {
 	Enabled bool     `yaml:"enabled"`
 	Queries []string `yaml:"queries"`  // 搜索关键词，逐条执行
 	PerPage int      `yaml:"per_page"` // 单次搜索返回条数
+	Pages   int      `yaml:"pages"`    // 每个关键词的搜索页数，默认 1
 	BaseURL string   `yaml:"base_url"` // 默认 https://api.github.com，测试可替换
 }
 
 // IndexSite 社区聚合索引站配置。
 type IndexSite struct {
-	URL string `yaml:"url"`
+	URL           string `yaml:"url"`
+	MaxCandidates int    `yaml:"max_candidates"` // 单站最多提取 URL 数，默认 80
 }
 
 // ClbugConfig 社区聚合页发现通道（tvbox.clbug.com/user.php）。
@@ -78,15 +81,14 @@ func New(cfg Config, f *fetcher.Fetcher, token string) *Discoverer {
 	return &Discoverer{cfg: cfg, fetcher: f, token: token}
 }
 
-// Run 执行发现全流程：双通道收集新候选 → 去重 → 与上轮发现源合并验证 →
-// 返回本轮验证通过的发现源列表。
+// Run 执行发现全流程：多通道收集候选 → 去重 → 合并上轮观察池 → 验证 →
+// 按观察期规则返回“本轮可正式入池”的源，同时返回完整观察池供落盘。
 //
-// existing 为已存在的源 URL 集合（人工源池 + 白名单 + 上轮发现池），
-// 新候选命中则跳过；prev 为上轮发现源池，本轮全部重新验证以淘汰失效源。
-func (d *Discoverer) Run(ctx context.Context, existing map[string]bool, prev []model.SourceConfig) ([]model.SourceConfig, error) {
+// 观察期规则：连续 2 轮验证成功才晋升（Promoted）；失败保留 3 轮宽限后淘汰。
+func (d *Discoverer) Run(ctx context.Context, existing map[string]bool, prev []model.SourceConfig) ([]model.SourceConfig, []model.SourceConfig, error) {
 	var candidates []string
 
-	// 通道一：GitHub 代码搜索（官方 Search API）
+	// 通道一：GitHub 代码搜索（官方 Search API，支持分页）
 	if d.cfg.GitHub.Enabled {
 		found, err := d.githubChannel(ctx)
 		if err != nil {
@@ -109,13 +111,31 @@ func (d *Discoverer) Run(ctx context.Context, existing map[string]bool, prev []m
 		found, err := d.indexChannel(ctx, site.URL)
 		if err != nil {
 			log.Printf("索引站 %s 抓取失败（跳过）: %v", site.URL, err)
+			continue
+		}
+		limit := site.MaxCandidates
+		if limit <= 0 {
+			limit = 80
+		}
+		if len(found) > limit {
+			found = found[:limit]
 		}
 		candidates = append(candidates, found...)
 	}
 
-	// 新候选去重 + 排除已有源
+	// 上轮观察池（含未晋升候选）作为跟踪基础
+	tracked := make(map[string]*model.SourceConfig, len(prev)+len(candidates))
+	for i := range prev {
+		p := prev[i]
+		if p.URL != "" {
+			entry := p
+			tracked[p.URL] = &entry
+		}
+	}
+
+	// 新候选去重 + 排除已有源 + 合入跟踪池
 	seen := map[string]bool{}
-	unique := make([]string, 0, len(candidates)+len(prev))
+	unique := make([]string, 0, len(candidates)+len(tracked))
 	for _, c := range candidates {
 		c = strings.TrimSpace(c)
 		if c == "" || seen[c] || existing[c] {
@@ -124,43 +144,58 @@ func (d *Discoverer) Run(ctx context.Context, existing map[string]bool, prev []m
 		seen[c] = true
 		unique = append(unique, c)
 	}
-	// 上轮发现源重新验证（淘汰失效源，保持池子新鲜）
-	for _, p := range prev {
-		if p.URL == "" || seen[p.URL] {
+	for url := range tracked {
+		if url == "" || seen[url] {
 			continue
 		}
-		seen[p.URL] = true
-		unique = append(unique, p.URL)
+		seen[url] = true
+		unique = append(unique, url)
 	}
-	log.Printf("发现候选源 %d 个（含上轮复验 %d），开始验证", len(unique), len(prev))
+	sort.Strings(unique)
+	log.Printf("发现候选源 %d 个（含上轮观察池 %d），开始验证", len(unique), len(tracked))
 
-	// 并发验证（受总时限约束，超时后停止）
+	// 并发验证（受总时限约束）
 	valCtx, valCancel := context.WithTimeout(ctx, validateTimeout)
 	defer valCancel()
 	results := d.validateAll(valCtx, unique)
 
-	// 验证结果按 URL 去重并限量
-	out := make([]model.SourceConfig, 0, len(results))
-	finalSeen := map[string]bool{}
-	for _, r := range results {
-		if r == nil || finalSeen[r.URL] {
-			continue
+	promoted := make([]model.SourceConfig, 0, len(unique))
+	pool := make([]model.SourceConfig, 0, len(unique))
+	for _, url := range unique {
+		entry := tracked[url]
+		if entry == nil {
+			entry = &model.SourceConfig{URL: url}
 		}
-		finalSeen[r.URL] = true
-		out = append(out, *r)
-		if len(out) >= d.cfg.MaxSources {
-			break
+		if src, ok := results[url]; ok && src != nil {
+			entry.Name, entry.Type = src.Name, src.Type
+			entry.SuccessRuns++
+			entry.FailRuns = 0
+		} else {
+			entry.FailRuns++
+		}
+		if entry.FailRuns > 3 {
+			continue // 连续失败 4 轮，淘汰
+		}
+		entry.Promoted = entry.SuccessRuns >= 2
+		pool = append(pool, *entry)
+		if entry.Promoted && len(promoted) < d.cfg.MaxSources {
+			promoted = append(promoted, *entry)
 		}
 	}
-	log.Printf("发现完成: 验证通过 %d 个", len(out))
-	return out, nil
+	// 观察池上限，避免无限增长
+	if maxPool := d.cfg.MaxSources * 3; len(pool) > maxPool {
+		pool = pool[:maxPool]
+	}
+	log.Printf("发现完成: 验证通过 %d / 观察池 %d / 本轮晋升 %d", len(results), len(pool), len(promoted))
+	return promoted, pool, nil
 }
 
-// validateAll 并发验证候选源，返回验证通过的源列表。
-func (d *Discoverer) validateAll(ctx context.Context, candidates []string) []*model.SourceConfig {
+// validateAll 并发验证候选源，返回 URL → 验证通过的源映射（未出现的即失败）。
+func (d *Discoverer) validateAll(ctx context.Context, candidates []string) map[string]*model.SourceConfig {
 	var wg sync.WaitGroup
+	var mu sync.Mutex
 	sem := make(chan struct{}, validateConcurrency)
-	resCh := make(chan *model.SourceConfig, len(candidates))
+	out := make(map[string]*model.SourceConfig, len(candidates))
 
 	for _, c := range candidates {
 		wg.Add(1)
@@ -169,17 +204,13 @@ func (d *Discoverer) validateAll(ctx context.Context, candidates []string) []*mo
 			defer wg.Done()
 			defer func() { <-sem }()
 			if src := d.validate(ctx, c); src != nil {
-				resCh <- src
+				mu.Lock()
+				out[c] = src
+				mu.Unlock()
 			}
 		}(c)
 	}
 	wg.Wait()
-	close(resCh)
-
-	out := make([]*model.SourceConfig, 0, len(candidates))
-	for r := range resCh {
-		out = append(out, r)
-	}
 	return out
 }
 

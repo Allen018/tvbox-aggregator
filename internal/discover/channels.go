@@ -77,45 +77,61 @@ func (d *Discoverer) githubChannel(ctx context.Context) ([]string, error) {
 		perPage = 100
 	}
 
+	pages := d.cfg.GitHub.Pages
+	if pages <= 0 {
+		pages = 1
+	}
+	if pages > 10 {
+		pages = 10 // GitHub Search API 上限
+	}
+
 	var all []string
 	for _, q := range d.cfg.GitHub.Queries {
 		q = strings.TrimSpace(q)
 		if q == "" {
 			continue
 		}
-		apiURL := fmt.Sprintf("%s/search/code?q=%s&per_page=%d",
-			base, url.QueryEscape(q), perPage)
-		req, err := http.NewRequestWithContext(ctx, http.MethodGet, apiURL, nil)
-		if err != nil {
-			return nil, err
-		}
-		req.Header.Set("Authorization", "Bearer "+d.token)
-		req.Header.Set("Accept", "application/vnd.github.text-match+json")
-		req.Header.Set("User-Agent", "tvbox-aggregator")
+		for page := 1; page <= pages; page++ {
+			apiURL := fmt.Sprintf("%s/search/code?q=%s&per_page=%d&page=%d",
+				base, url.QueryEscape(q), perPage, page)
+			req, err := http.NewRequestWithContext(ctx, http.MethodGet, apiURL, nil)
+			if err != nil {
+				return nil, err
+			}
+			req.Header.Set("Authorization", "Bearer "+d.token)
+			req.Header.Set("Accept", "application/vnd.github.text-match+json")
+			req.Header.Set("User-Agent", "tvbox-aggregator")
 
-		resp, err := d.fetcher.Client().Do(req)
-		if err != nil {
-			return nil, err
-		}
-		body, _ := io.ReadAll(io.LimitReader(resp.Body, 8<<20))
-		resp.Body.Close()
-		if resp.StatusCode != http.StatusOK {
-			return nil, fmt.Errorf("GitHub API HTTP %d: %.200s", resp.StatusCode, string(body))
-		}
+			resp, err := d.fetcher.Client().Do(req)
+			if err != nil {
+				return nil, err
+			}
+			body, _ := io.ReadAll(io.LimitReader(resp.Body, 8<<20))
+			resp.Body.Close()
+			if resp.StatusCode == http.StatusForbidden || resp.StatusCode == http.StatusUnauthorized {
+				return nil, fmt.Errorf("GitHub API 限流/认证失败 HTTP %d", resp.StatusCode)
+			}
+			if resp.StatusCode != http.StatusOK {
+				return nil, fmt.Errorf("GitHub API HTTP %d: %.200s", resp.StatusCode, string(body))
+			}
 
-		var result struct {
-			Items []struct {
-				TextMatches []struct {
-					Fragment string `json:"fragment"`
-				} `json:"text_matches"`
-			} `json:"items"`
-		}
-		if err := json.Unmarshal(body, &result); err != nil {
-			return nil, err
-		}
-		for _, item := range result.Items {
-			for _, tm := range item.TextMatches {
-				all = append(all, extractURLs(tm.Fragment)...)
+			var result struct {
+				Items []struct {
+					TextMatches []struct {
+						Fragment string `json:"fragment"`
+					} `json:"text_matches"`
+				} `json:"items"`
+			}
+			if err := json.Unmarshal(body, &result); err != nil {
+				return nil, err
+			}
+			if len(result.Items) == 0 {
+				break // 后续页不会有更多结果
+			}
+			for _, item := range result.Items {
+				for _, tm := range item.TextMatches {
+					all = append(all, extractURLs(tm.Fragment)...)
+				}
 			}
 		}
 	}

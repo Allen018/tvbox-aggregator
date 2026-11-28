@@ -1,22 +1,27 @@
-# 采集站自动发现配置（一期双通道）
+# 采集站自动发现配置（多入口 + 观察期）
 #
-# 合规边界：仅探测公开 HTTP 端点（标准采集 API 路径），
+# 合规边界：仅探测公开 HTTP 端点（标准采集 API 路径/公开配置页），
 # 不突破反爬、不绕过 robots、不访问需认证内容；全局限速、低频率运行。
-# 发现源经验证通过（200 + 合法 JSON + 有视频列表）后进入候选池，
-# 与人工源池合并测速，产物中标注 [新发现]。
+# 发现源需连续 2 轮验证成功才晋升为正式源，产物中标注 [新发现]。
 
 discover:
   enabled: true
-  max_sources: 60 # 每轮最多收录的发现源数量，控制测速耗时
+  max_sources: 60 # 每轮最多晋升的发现源数量，控制测速耗时
 
   # 通道一：GitHub 代码搜索（官方 Search API，需 GITHUB_TOKEN）
-  # 搜索公开仓库中包含采集 API 地址的 TVBox 配置文件，提取其中链接
   github:
     enabled: true
     queries:
       - "motif/api.php/provide/vod"
       - "api.php/provide/vod"
+      - "provide/vod/at/xml"
+      - "storeHouse"
+      - "spider.jar;md5"
+      - "drpy2.min.js"
+      - "csp_"
+      - "tvbox_multi.json"
     per_page: 100
+    pages: 3 # 每个关键词搜索 3 页，GitHub Search API 上限 10
 
   # 通道二：社区聚合页 tvbox.clbug.com/user.php（提取 data-url 订阅地址）
   clbug:
@@ -24,6 +29,15 @@ discover:
     url: "https://tvbox.clbug.com/user.php"
     max_candidates: 120 # 页面当前约 105 条，留余量
 
-  # 通道三：社区聚合索引站（通用链接提取，兜底）
+  # 通道三：公开索引站/导航页（通用链接提取，兜底）
   index_sites:
     - url: "https://tvbox.clbug.com/user.php"
+      max_candidates: 120
+    - url: "https://b.zhuiju.me/p/3/"
+      max_candidates: 80
+    - url: "https://m.7po.com/article/3174.html"
+      max_candidates: 80
+    - url: "https://gitee.com/xlsn0w/tvbox-source-address"
+      max_candidates: 80
+    - url: "https://github.com/qist/tvbox"
+      max_candidates: 80

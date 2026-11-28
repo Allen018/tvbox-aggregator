@@ -225,11 +225,11 @@ func TestRunDualChannel(t *testing.T) {
 		"http://existing.example/motif/api.php/provide/vod": true,
 	}
 	prev := []model.SourceConfig{
-		{Name: "上轮有效源", URL: validURL},                                       // 复验应保留
+		{Name: "上轮有效源", URL: validURL, SuccessRuns: 1},                       // 本轮再成功一次即晋升
 		{Name: "上轮失效源", URL: "http://127.0.0.1:1/motif/api.php/provide/vod"}, // 复验应淘汰
 	}
 
-	out, err := d.Run(context.Background(), existing, prev)
+	out, _, err := d.Run(context.Background(), existing, prev)
 	if err != nil {
 		t.Fatalf("Run 报错: %v", err)
 	}
