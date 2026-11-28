@@ -49,6 +49,8 @@ var excludeCategoryKeywords = []string{
 	"盘", "玩偶",
 	// 非点播工具/商店类
 	"应用", "應用", "商店", "急救", "配置中心", "设置", "工具箱", "书架", "小说", "漫画",
+	// 教程/下载工具/直播转点播
+	"教程", "迅雷", "直播", "转点播",
 }
 
 // isExcludedCategory 判断站点名称是否属于排除的内容类别（大小写不敏感）。
@@ -95,6 +97,7 @@ func isWebDisk(s model.Site) bool {
 var nonVodAPIPrefixes = []string{
 	"csp_market", "csp_firstaid", "csp_config", "csp_token",
 	"csp_setting", "csp_tool", "csp_app", "csp_book", "csp_novel", "csp_comic",
+	"csp_bili", "csp_zhaozy", "csp_dovx", "csp_xunlei", "csp_leidian",
 }
 
 // isNonVod 根据 api 类名与 ext 内容识别非点播工具站。
@@ -106,7 +109,10 @@ func isNonVod(s model.Site) bool {
 		}
 	}
 	ext := strings.ToLower(s.Ext)
-	for _, k := range []string{"market.json", "token.json", "firstaid", "config.json"} {
+	for _, k := range []string{
+		"market.json", "token.json", "firstaid", "config.json",
+		"127.0.0.1", "localhost", "0.0.0.0", "token.txt",
+	} {
 		if strings.Contains(ext, k) {
 			return true
 		}
@@ -400,8 +406,9 @@ func (b *Builder) buildSubscription(sites []model.Site, probes map[string]*model
 	var wl, ranked, spider []model.Site
 	spiderSeen := map[string]bool{}
 	for _, s := range sites {
-		// 内容类别 + 网盘站 + 非点播工具站识别（名称/api/ext 三层）
-		if isExcludedCategory(s.Name) || isWebDisk(s) || isNonVod(s) {
+		// 内容类别 + 网盘站 + 非点播工具站识别（名称+key/api/ext 三层）
+		// 部分站点的排除关键词在 key 里而 name 被美化过，两者都要检查。
+		if isExcludedCategory(s.Name+" "+s.Key) || isWebDisk(s) || isNonVod(s) {
 			continue
 		}
 		// 爬虫站：用内部标记判断，不能用 type（JSON CMS 也是 type 1）
